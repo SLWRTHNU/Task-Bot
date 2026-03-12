@@ -23,18 +23,18 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = int(os.getenv("TELEGRAM_CHAT_ID", "0"))
 
-# Escalation messages — progressively more urgent for ADHD brains
-ESCALATION_TEMPLATES = [
-    # Level 0 — gentle nudge
-    ("🌱", "Hey! Just a nudge:", "You've got something to do."),
-    # Level 1 — friendly reminder
-    ("⏰", "Reminder:", "Don't forget about this one!"),
-    # Level 2 — more direct
-    ("🔔", "Still waiting:", "This task is still pending. You got this!"),
-    # Level 3 — urgent
-    ("🚨", "URGENT:", "This needs your attention NOW. You can do it!"),
-    # Level 4 — critical
-    ("🔴", "CRITICAL:", "DROP EVERYTHING — this task is overdue! Complete it NOW."),
+# Escalation messages — progressively harsher to cut through ADHD avoidance
+ESCALATION_MESSAGES = [
+    # Level 0 — motivating
+    "You've got this. Take 5 minutes right now and knock it out — future you will be grateful.",
+    # Level 1 — firmer
+    "Still here. Still waiting. Every time you push this off, it takes up more space in your head. Just start — you don't have to finish perfectly, you just have to start.",
+    # Level 2 — direct and uncomfortable
+    "You've now ignored this multiple times. This is the pattern that makes you feel behind and overwhelmed. Break it. Do this one thing right now.",
+    # Level 3 — blunt
+    "This keeps getting pushed back because some part of you thinks it'll be easier later. It won't. You are actively making your life harder by not doing this. Stop it.",
+    # Level 4 — no mercy
+    "You have let this sit long enough to get a full guilt spiral going. That's on you. The only way out is through — do it now, not because it feels good, but because you are someone who follows through.",
 ]
 
 PRIORITY_EMOJI = {
@@ -47,8 +47,8 @@ PRIORITY_EMOJI = {
 
 def build_task_message(task: dict, escalation_level: int) -> str:
     """Build a formatted Telegram message for a task reminder."""
-    level = min(escalation_level, len(ESCALATION_TEMPLATES) - 1)
-    emoji, header, footer = ESCALATION_TEMPLATES[level]
+    level = min(escalation_level, len(ESCALATION_MESSAGES) - 1)
+    motivation = ESCALATION_MESSAGES[level]
     priority = task.get("priority", "medium")
     p_emoji = PRIORITY_EMOJI.get(priority, "🟡")
 
@@ -68,13 +68,12 @@ def build_task_message(task: dict, escalation_level: int) -> str:
     tag_str = f"\n🏷️ {tags}" if tags else ""
 
     msg = (
-        f"{emoji} <b>{header}</b>\n\n"
-        f"{p_emoji} <b>{task['title']}</b>"
+        f"{p_emoji} <b>Task:</b> {task['title']}"
         f"{due_str}{rec_str}{tag_str}\n"
     )
     if task.get("description"):
         msg += f"\n📝 {task['description']}\n"
-    msg += f"\n<i>{footer}</i>"
+    msg += f"\n<i>{motivation}</i>"
     return msg
 
 
