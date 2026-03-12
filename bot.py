@@ -13,9 +13,23 @@ from telegram.ext import (
 )
 from telegram.error import TelegramError
 
+import anthropic
+
 import database as db
 
 logger = logging.getLogger(__name__)
+
+# Lazy-initialized Anthropic client
+_anthropic_client: Optional[anthropic.Anthropic] = None
+
+def get_anthropic_client() -> anthropic.Anthropic:
+    global _anthropic_client
+    if _anthropic_client is None:
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
+        _anthropic_client = anthropic.Anthropic(api_key=api_key)
+    return _anthropic_client
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = int(os.getenv("TELEGRAM_CHAT_ID", "0"))
@@ -151,6 +165,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/done &lt;id&gt; — Complete a task\n"
         "/snooze &lt;id&gt; [minutes] — Snooze a task\n"
         "/delete &lt;id&gt; — Delete a task\n"
+        "/ask &lt;question&gt; — Ask Claude anything\n"
         "/help — Show this message\n\n"
         "You can also manage tasks via the web dashboard! 🌐"
     )
@@ -301,6 +316,49 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🗑️ Task <b>#{task_id}</b> deleted: {task['title']}", parse_mode="HTML")
 
 
+async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ask Claude a question: /ask <question>"""
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Usage: /ask <question>\nExample: /ask How should I prioritize my tasks today?"
+        )
+        return
+
+    question = " ".join(args)
+    logger.debug(f"cmd_ask called with question: {question!r}")
+
+    try:
+        client = get_anthropic_client()
+        logger.debug("Anthropic client initialized, sending request with model=claude-sonnet-4-5")
+
+        response = client.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": question}],
+        )
+
+        answer = response.content[0].text
+        logger.debug(f"Received response: stop_reason={response.stop_reason}, tokens={response.usage}")
+        await update.message.reply_text(answer)
+
+    except ValueError as e:
+        logger.error(f"Configuration error in cmd_ask: {e}")
+        await update.message.reply_text(f"Configuration error: {e}")
+    except anthropic.APIStatusError as e:
+        logger.error(
+            f"Anthropic API error in cmd_ask: status={e.status_code} "
+            f"response={e.response.text if e.response else 'N/A'} message={e.message}"
+        )
+        await update.message.reply_text(f"API error ({e.status_code}): {e.message}")
+    except anthropic.APIConnectionError as e:
+        logger.error(f"Anthropic connection error in cmd_ask: {e}")
+        await update.message.reply_text("Could not connect to Claude API. Check your network.")
+    except Exception as e:
+        logger.error(f"Unexpected error in cmd_ask: {type(e).__name__}: {e}", exc_info=True)
+        await update.message.reply_text("Something went wrong. Check logs for details.")
+
+
 # ── Callback query handlers ───────────────────────────────────────────────────
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -361,6 +419,7 @@ def create_bot_app() -> Application:
     app.add_handler(CommandHandler("done", cmd_done))
     app.add_handler(CommandHandler("snooze", cmd_snooze))
     app.add_handler(CommandHandler("delete", cmd_delete))
+    app.add_handler(CommandHandler("ask", cmd_ask))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
     return app
