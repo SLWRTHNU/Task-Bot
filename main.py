@@ -28,7 +28,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 WEB_HOST = os.getenv("WEB_HOST", "0.0.0.0")
-WEB_PORT = int(os.getenv("WEB_PORT", "8000"))
+WEB_PORT = int(os.getenv("PORT", os.getenv("WEB_PORT", "8000")))
 
 
 async def run_scheduler(bot_app):
