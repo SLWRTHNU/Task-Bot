@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ADHD Task Bot — Dashboard</title>
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f0f13;
+      --surface: #1a1a24;
+      --surface2: #22222f;
+      --border: #2e2e3f;
+      --accent: #7c6ff7;
+      --accent2: #5eead4;
+      --green: #4ade80;
+      --yellow: #facc15;
+      --orange: #fb923c;
+      --red: #f87171;
+      --text: #e2e2f0;
+      --text-dim: #8888aa;
+      --radius: 12px;
+      --shadow: 0 4px 24px rgba(0,0,0,0.4);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    /* ── Layout ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    header h1 { font-size: 1.25rem; font-weight: 700; }
+    header .brain { font-size: 1.5rem; }
+    header .badge {
+      margin-left: auto;
+      background: var(--accent);
+      color: white;
+      font-size: 0.75rem;
+      padding: 2px 10px;
+      border-radius: 99px;
+      font-weight: 600;
+    }
+
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 24px 16px;
+      display: grid;
+      gap: 24px;
+    }
+
+    /* ── Stats bar ── */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 12px;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      text-align: center;
+    }
+    .stat-card .value { font-size: 2rem; font-weight: 800; }
+    .stat-card .label { font-size: 0.8rem; color: var(--text-dim); margin-top: 2px; }
+    .stat-card.pending .value { color: var(--yellow); }
+    .stat-card.done .value { color: var(--green); }
+    .stat-card.recurring .value { color: var(--accent2); }
+    .stat-card.urgent .value { color: var(--red); }
+
+    /* ── Add Task Panel ── */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .panel-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      user-select: none;
+    }
+    .panel-header:hover { background: var(--surface2); }
+    .panel-body { padding: 20px; }
+    .panel-body.collapsed { display: none; }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    .form-grid .full { grid-column: 1 / -1; }
+
+    label { display: block; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 4px; }
+    input, select, textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 9px 12px;
+      font-size: 0.9rem;
+      font-family: inherit;
+      transition: border-color 0.2s;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    textarea { resize: vertical; min-height: 64px; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 18px;
+      border-radius: 8px;
+      border: none;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-success { background: var(--green); color: #0a1a10; }
+    .btn-warning { background: var(--orange); color: #1a0a00; }
+    .btn-danger { background: var(--red); color: #1a0000; }
+    .btn-ghost { background: var(--surface2); color: var(--text); }
+    .btn:hover { opacity: 0.85; }
+
+    .form-actions { display: flex; gap: 10px; margin-top: 16px; }
+
+    /* ── Filter bar ── */
+    .filter-bar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .filter-btn {
+      padding: 6px 14px;
+      border-radius: 99px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-dim);
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .filter-btn:hover, .filter-btn.active {
+      border-color: var(--accent);
+      color: var(--text);
+      background: var(--surface2);
+    }
+    .filter-btn.active { color: var(--accent); }
+    .search-input {
+      margin-left: auto;
+      max-width: 200px;
+      padding: 6px 12px;
+      font-size: 0.85rem;
+    }
+
+    /* ── Task list ── */
+    .task-list { display: grid; gap: 10px; }
+    .task-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 12px;
+      align-items: start;
+      transition: border-color 0.2s, opacity 0.3s;
+      animation: slideIn 0.25s ease;
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .task-card:hover { border-color: var(--accent); }
+    .task-card.completed { opacity: 0.5; }
+    .task-card.priority-urgent { border-left: 3px solid var(--red); }
+    .task-card.priority-high { border-left: 3px solid var(--orange); }
+    .task-card.priority-medium { border-left: 3px solid var(--yellow); }
+    .task-card.priority-low { border-left: 3px solid var(--green); }
+
+    .task-check {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      background: none;
+      cursor: pointer;
+      flex-shrink: 0;
+      margin-top: 2px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+    .task-check:hover { border-color: var(--green); background: rgba(74,222,128,0.1); }
+    .task-check.checked { border-color: var(--green); background: var(--green); }
+
+    .task-body { min-width: 0; }
+    .task-title {
+      font-weight: 600;
+      font-size: 0.95rem;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .task-title.strikethrough { text-decoration: line-through; color: var(--text-dim); }
+    .task-meta { font-size: 0.78rem; color: var(--text-dim); margin-top: 4px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .task-desc { font-size: 0.85rem; color: var(--text-dim); margin-top: 6px; }
+    .tag {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 99px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+    }
+    .badge-priority {
+      padding: 1px 7px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+    .badge-priority.urgent { background: rgba(248,113,113,0.2); color: var(--red); }
+    .badge-priority.high { background: rgba(251,146,60,0.2); color: var(--orange); }
+    .badge-priority.medium { background: rgba(250,204,21,0.2); color: var(--yellow); }
+    .badge-priority.low { background: rgba(74,222,128,0.2); color: var(--green); }
+
+    .task-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .icon-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text-dim);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      transition: all 0.15s;
+    }
+    .icon-btn:hover { border-color: var(--accent); color: var(--text); }
+    .icon-btn.danger:hover { border-color: var(--red); color: var(--red); }
+
+    .escalation-bar {
+      display: flex;
+      gap: 3px;
+      margin-top: 6px;
+    }
+    .escalation-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--border);
+    }
+    .escalation-dot.active { background: var(--accent); }
+    .escalation-dot.fired { background: var(--red); }
+
+    /* ── Empty state ── */
+    .empty {
+      text-align: center;
+      padding: 48px 24px;
+      color: var(--text-dim);
+    }
+    .empty .emoji { font-size: 3rem; margin-bottom: 12px; }
+    .empty h3 { font-size: 1.1rem; margin-bottom: 6px; color: var(--text); }
+
+    /* ── Modal ── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      width: 100%;
+      max-width: 560px;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: var(--shadow);
+      animation: modalIn 0.2s ease;
+    }
+    @keyframes modalIn {
+      from { opacity: 0; transform: scale(0.95) translateY(-10px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    .modal-header {
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-weight: 700;
+      font-size: 1rem;
+    }
+    .modal-body { padding: 20px; }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 18px;
+      font-size: 0.9rem;
+      z-index: 300;
+      transform: translateY(80px);
+      opacity: 0;
+      transition: all 0.3s;
+      max-width: 320px;
+    }
+    #toast.show { transform: translateY(0); opacity: 1; }
+    #toast.success { border-color: var(--green); }
+    #toast.error { border-color: var(--red); }
+
+    /* ── Responsive ── */
+    @media (max-width: 600px) {
+      .form-grid { grid-template-columns: 1fr; }
+      .form-grid .full { grid-column: 1; }
+      .task-card { grid-template-columns: auto 1fr; }
+      .task-actions { grid-column: 1 / -1; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <span class="brain">🧠</span>
+  <h1>ADHD Task Bot</h1>
+  <span class="badge" id="pending-badge">0 pending</span>
+</header>
+
+<main>
+  <!-- Stats -->
+  <div class="stats" id="stats">
+    <div class="stat-card pending">
+      <div class="value" id="stat-pending">–</div>
+      <div class="label">Pending</div>
+    </div>
+    <div class="stat-card done">
+      <div class="value" id="stat-done">–</div>
+      <div class="label">Completed</div>
+    </div>
+    <div class="stat-card recurring">
+      <div class="value" id="stat-recurring">–</div>
+      <div class="label">Recurring</div>
+    </div>
+    <div class="stat-card urgent">
+      <div class="value" id="stat-urgent">–</div>
+      <div class="label">Urgent</div>
+    </div>
+  </div>
+
+  <!-- Add Task Panel -->
+  <div class="panel">
+    <div class="panel-header" onclick="toggleAddForm()">
+      <span>➕</span>
+      <span>Add New Task</span>
+      <span id="add-chevron" style="margin-left:auto">▼</span>
+    </div>
+    <div class="panel-body" id="add-form-body">
+      <form id="add-form" onsubmit="submitTask(event)">
+        <div class="form-grid">
+          <div class="full">
+            <label>Task Title *</label>
+            <input type="text" id="f-title" placeholder="e.g. Take medication" required />
+          </div>
+          <div class="full">
+            <label>Description</label>
+            <textarea id="f-desc" placeholder="Optional details..."></textarea>
+          </div>
+          <div>
+            <label>Priority</label>
+            <select id="f-priority">
+              <option value="low">🟢 Low</option>
+              <option value="medium" selected>🟡 Medium</option>
+              <option value="high">🔴 High</option>
+              <option value="urgent">💥 Urgent</option>
+            </select>
+          </div>
+          <div>
+            <label>Recurrence</label>
+            <select id="f-recurrence" onchange="toggleInterval()">
+              <option value="none">None (one-time)</option>
+              <option value="hourly">Hourly</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </div>
+          <div id="interval-group" style="display:none">
+            <label>Every N (interval)</label>
+            <input type="number" id="f-interval" value="1" min="1" max="365" />
+          </div>
+          <div>
+            <label>Due Date &amp; Time</label>
+            <input type="datetime-local" id="f-due" />
+          </div>
+          <div>
+            <label>First Reminder</label>
+            <input type="datetime-local" id="f-reminder" />
+          </div>
+          <div>
+            <label>Tags (comma-separated)</label>
+            <input type="text" id="f-tags" placeholder="work, health, meds" />
+          </div>
+          <div>
+            <label>Escalation (minutes, comma-sep)</label>
+            <input type="text" id="f-escalation" value="0,30,60,120,240"
+                   placeholder="0,30,60,120,240" />
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">➕ Add Task</button>
+          <button type="button" class="btn btn-ghost" onclick="resetForm()">Clear</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Filter + Tasks -->
+  <div>
+    <div class="filter-bar" style="margin-bottom:14px">
+      <button class="filter-btn active" data-filter="pending" onclick="setFilter('pending',this)">⏳ Pending</button>
+      <button class="filter-btn" data-filter="all" onclick="setFilter('all',this)">📋 All</button>
+      <button class="filter-btn" data-filter="completed" onclick="setFilter('completed',this)">✅ Done</button>
+      <input type="text" class="search-input" placeholder="🔍 Search..." oninput="filterTasks(this.value)" />
+    </div>
+    <div class="task-list" id="task-list">
+      <div class="empty"><div class="emoji">⏳</div><h3>Loading...</h3></div>
+    </div>
+  </div>
+</main>
+
+<!-- Edit Modal -->
+<div class="modal-overlay" id="edit-modal" onclick="closeEditModal(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <span>✏️ Edit Task</span>
+      <button class="icon-btn" onclick="closeEditModalDirect()">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="edit-form" onsubmit="saveEdit(event)">
+        <input type="hidden" id="e-id" />
+        <div class="form-grid">
+          <div class="full">
+            <label>Title</label>
+            <input type="text" id="e-title" required />
+          </div>
+          <div class="full">
+            <label>Description</label>
+            <textarea id="e-desc"></textarea>
+          </div>
+          <div>
+            <label>Priority</label>
+            <select id="e-priority">
+              <option value="low">🟢 Low</option>
+              <option value="medium">🟡 Medium</option>
+              <option value="high">🔴 High</option>
+              <option value="urgent">💥 Urgent</option>
+            </select>
+          </div>
+          <div>
+            <label>Recurrence</label>
+            <select id="e-recurrence">
+              <option value="none">None</option>
+              <option value="hourly">Hourly</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </div>
+          <div>
+            <label>Interval</label>
+            <input type="number" id="e-interval" value="1" min="1" />
+          </div>
+          <div>
+            <label>Due Date</label>
+            <input type="datetime-local" id="e-due" />
+          </div>
+          <div>
+            <label>Next Reminder</label>
+            <input type="datetime-local" id="e-reminder" />
+          </div>
+          <div>
+            <label>Tags</label>
+            <input type="text" id="e-tags" />
+          </div>
+          <div>
+            <label>Escalation Minutes</label>
+            <input type="text" id="e-escalation" />
+          </div>
+        </div>
+        <div class="form-actions" style="margin-top:16px">
+          <button type="submit" class="btn btn-primary">💾 Save</button>
+          <button type="button" class="btn btn-ghost" onclick="closeEditModalDirect()">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Snooze Modal -->
+<div class="modal-overlay" id="snooze-modal" onclick="closeSnoozeModal(event)">
+  <div class="modal" style="max-width:360px">
+    <div class="modal-header">
+      <span>😴 Snooze Task</span>
+      <button class="icon-btn" onclick="closeSnoozeModalDirect()">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="snooze-id" />
+      <p style="color:var(--text-dim);margin-bottom:16px">How long to snooze reminders?</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <button class="btn btn-ghost" onclick="doSnooze(15)">15 minutes</button>
+        <button class="btn btn-ghost" onclick="doSnooze(30)">30 minutes</button>
+        <button class="btn btn-ghost" onclick="doSnooze(60)">1 hour</button>
+        <button class="btn btn-ghost" onclick="doSnooze(120)">2 hours</button>
+        <button class="btn btn-ghost" onclick="doSnooze(480)">8 hours</button>
+        <button class="btn btn-ghost" onclick="doSnooze(1440)">Tomorrow</button>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px;align-items:center">
+        <input type="number" id="snooze-custom" placeholder="Custom minutes" min="1"
+               style="flex:1" onkeydown="if(event.key==='Enter'){doSnooze(parseInt(this.value))}" />
+        <button class="btn btn-primary" onclick="doSnooze(parseInt(document.getElementById('snooze-custom').value))">Snooze</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+  let allTasks = [];
+  let currentFilter = 'pending';
+  let searchQuery = '';
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+
+  document.addEventListener('DOMContentLoaded', () => {
+    loadStats();
+    loadTasks();
+    setDefaultDates();
+    setInterval(() => { loadStats(); loadTasks(); }, 30000); // refresh every 30s
+  });
+
+  function setDefaultDates() {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() + 60);
+    const local = toLocalInputValue(now);
+    document.getElementById('f-due').value = local;
+    document.getElementById('f-reminder').value = local;
+  }
+
+  function toLocalInputValue(d) {
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  // ── Data Loading ──────────────────────────────────────────────────────────
+
+  async function loadStats() {
+    try {
+      const r = await fetch('/api/stats');
+      const data = await r.json();
+      document.getElementById('stat-pending').textContent = data.pending;
+      document.getElementById('stat-done').textContent = data.completed;
+      document.getElementById('stat-recurring').textContent = data.recurring;
+      document.getElementById('stat-urgent').textContent = data.by_priority.urgent + data.by_priority.high;
+      document.getElementById('pending-badge').textContent = `${data.pending} pending`;
+    } catch(e) { console.error('Stats error:', e); }
+  }
+
+  async function loadTasks() {
+    try {
+      const r = await fetch('/api/tasks');
+      const data = await r.json();
+      allTasks = data.tasks;
+      renderTasks();
+    } catch(e) {
+      console.error('Load error:', e);
+      document.getElementById('task-list').innerHTML =
+        '<div class="empty"><div class="emoji">❌</div><h3>Failed to load tasks</h3></div>';
+    }
+  }
+
+  function setFilter(f, el) {
+    currentFilter = f;
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    el.classList.add('active');
+    renderTasks();
+  }
+
+  function filterTasks(q) {
+    searchQuery = q.toLowerCase();
+    renderTasks();
+  }
+
+  function renderTasks() {
+    let tasks = allTasks;
+
+    if (currentFilter === 'pending') tasks = tasks.filter(t => t.status === 'pending');
+    else if (currentFilter === 'completed') tasks = tasks.filter(t => t.status === 'completed');
+
+    if (searchQuery) {
+      tasks = tasks.filter(t =>
+        t.title.toLowerCase().includes(searchQuery) ||
+        (t.description || '').toLowerCase().includes(searchQuery) ||
+        (t.tags || '').toLowerCase().includes(searchQuery)
+      );
+    }
+
+    const container = document.getElementById('task-list');
+    if (tasks.length === 0) {
+      container.innerHTML = `<div class="empty">
+        <div class="emoji">${currentFilter === 'completed' ? '📭' : '🎉'}</div>
+        <h3>${currentFilter === 'completed' ? 'No completed tasks yet' : 'All clear! No pending tasks.'}</h3>
+        <p style="margin-top:8px;font-size:0.9rem">
+          ${currentFilter === 'pending' ? 'Add a task above to get started.' : ''}
+        </p>
+      </div>`;
+      return;
+    }
+
+    container.innerHTML = tasks.map(renderTaskCard).join('');
+  }
+
+  function renderTaskCard(t) {
+    const priority = t.priority || 'medium';
+    const isDone = t.status === 'completed';
+    const escalation = t.reminder_escalation_minutes
+      ? t.reminder_escalation_minutes.split(',').length : 5;
+    const currentLevel = t.current_escalation_level || 0;
+
+    const dots = Array.from({length: 5}, (_, i) => {
+      const cls = i < currentLevel ? 'escalation-dot fired' :
+                  i === currentLevel ? 'escalation-dot active' : 'escalation-dot';
+      return `<div class="${cls}" title="Level ${i+1}"></div>`;
+    }).join('');
+
+    let metaParts = [];
+    if (t.due_date) {
+      try {
+        const d = new Date(t.due_date);
+        const isOverdue = !isDone && d < new Date();
+        metaParts.push(`<span style="color:${isOverdue ? 'var(--red)' : ''}">📅 ${formatDate(d)}</span>`);
+      } catch(e) {}
+    }
+    if (t.recurrence && t.recurrence !== 'none') {
+      const interval = t.recurrence_interval > 1 ? ` ×${t.recurrence_interval}` : '';
+      metaParts.push(`🔁 ${t.recurrence}${interval}`);
+    }
+    if (t.snoozed_until && new Date(t.snoozed_until) > new Date()) {
+      metaParts.push(`😴 snoozed until ${formatDate(new Date(t.snoozed_until))}`);
+    }
+    const tags = t.tags ? t.tags.split(',').filter(Boolean).map(tag =>
+      `<span class="tag">${tag.trim()}</span>`
+    ).join(' ') : '';
+
+    return `
+    <div class="task-card priority-${priority} ${isDone ? 'completed' : ''}" id="task-${t.id}">
+      <button class="task-check ${isDone ? 'checked' : ''}" onclick="completeTask(${t.id})" title="Mark complete">
+        ${isDone ? '✓' : ''}
+      </button>
+      <div class="task-body">
+        <div class="task-title ${isDone ? 'strikethrough' : ''}">
+          ${escHtml(t.title)}
+          <span class="badge-priority ${priority}">${priority}</span>
+          ${tags}
+        </div>
+        ${t.description ? `<div class="task-desc">${escHtml(t.description)}</div>` : ''}
+        <div class="task-meta">${metaParts.join(' · ')}</div>
+        ${!isDone ? `<div class="escalation-bar" title="Reminder escalation level">${dots}</div>` : ''}
+      </div>
+      <div class="task-actions">
+        ${!isDone ? `<button class="icon-btn" onclick="openSnooze(${t.id})" title="Snooze">😴</button>` : ''}
+        <button class="icon-btn" onclick="openEdit(${t.id})" title="Edit">✏️</button>
+        <button class="icon-btn danger" onclick="deleteTask(${t.id})" title="Delete">🗑️</button>
+      </div>
+    </div>`;
+  }
+
+  function formatDate(d) {
+    const now = new Date();
+    const diff = d - now;
+    if (Math.abs(diff) < 60000) return 'just now';
+    if (diff > 0 && diff < 86400000) {
+      return `in ${Math.round(diff/60000)}m`;
+    }
+    if (diff < 0 && diff > -86400000) {
+      return `${Math.round(-diff/60000)}m ago`;
+    }
+    return d.toLocaleDateString(undefined, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ── Task Actions ──────────────────────────────────────────────────────────
+
+  async function completeTask(id) {
+    try {
+      const r = await fetch(`/api/tasks/${id}/complete`, {method:'POST'});
+      const data = await r.json();
+      toast('🎉 ' + data.message, 'success');
+      loadTasks(); loadStats();
+    } catch(e) { toast('Failed to complete task', 'error'); }
+  }
+
+  async function deleteTask(id) {
+    const task = allTasks.find(t => t.id === id);
+    if (!confirm(`Delete "${task?.title}"?`)) return;
+    try {
+      await fetch(`/api/tasks/${id}`, {method:'DELETE'});
+      toast('🗑️ Task deleted', 'success');
+      loadTasks(); loadStats();
+    } catch(e) { toast('Failed to delete task', 'error'); }
+  }
+
+  // ── Add Task Form ─────────────────────────────────────────────────────────
+
+  function toggleAddForm() {
+    const body = document.getElementById('add-form-body');
+    const chevron = document.getElementById('add-chevron');
+    const collapsed = body.classList.toggle('collapsed');
+    chevron.textContent = collapsed ? '▶' : '▼';
+  }
+
+  function toggleInterval() {
+    const v = document.getElementById('f-recurrence').value;
+    document.getElementById('interval-group').style.display = v === 'none' ? 'none' : 'block';
+  }
+
+  function resetForm() {
+    document.getElementById('add-form').reset();
+    setDefaultDates();
+    document.getElementById('f-escalation').value = '0,30,60,120,240';
+  }
+
+  async function submitTask(e) {
+    e.preventDefault();
+    const due = document.getElementById('f-due').value;
+    const reminder = document.getElementById('f-reminder').value;
+
+    const payload = {
+      title: document.getElementById('f-title').value.trim(),
+      description: document.getElementById('f-desc').value.trim(),
+      priority: document.getElementById('f-priority').value,
+      recurrence: document.getElementById('f-recurrence').value,
+      recurrence_interval: parseInt(document.getElementById('f-interval').value) || 1,
+      due_date: due ? new Date(due).toISOString() : null,
+      reminder_start: reminder ? new Date(reminder).toISOString() : null,
+      escalation_minutes: document.getElementById('f-escalation').value,
+      tags: document.getElementById('f-tags').value.trim(),
+    };
+
+    try {
+      const r = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      toast('✅ Task created!', 'success');
+      resetForm();
+      loadTasks(); loadStats();
+    } catch(e) {
+      toast('Failed to create task: ' + e.message, 'error');
+    }
+  }
+
+  // ── Edit Modal ────────────────────────────────────────────────────────────
+
+  function openEdit(id) {
+    const t = allTasks.find(t => t.id === id);
+    if (!t) return;
+    document.getElementById('e-id').value = t.id;
+    document.getElementById('e-title').value = t.title;
+    document.getElementById('e-desc').value = t.description || '';
+    document.getElementById('e-priority').value = t.priority || 'medium';
+    document.getElementById('e-recurrence').value = t.recurrence || 'none';
+    document.getElementById('e-interval').value = t.recurrence_interval || 1;
+    document.getElementById('e-tags').value = t.tags || '';
+    document.getElementById('e-escalation').value = t.reminder_escalation_minutes || '0,30,60,120,240';
+    if (t.due_date) {
+      try { document.getElementById('e-due').value = toLocalInputValue(new Date(t.due_date)); } catch(e){}
+    }
+    if (t.reminder_start) {
+      try { document.getElementById('e-reminder').value = toLocalInputValue(new Date(t.reminder_start)); } catch(e){}
+    }
+    document.getElementById('edit-modal').classList.add('open');
+  }
+
+  function closeEditModal(e) {
+    if (e.target === document.getElementById('edit-modal')) closeEditModalDirect();
+  }
+  function closeEditModalDirect() {
+    document.getElementById('edit-modal').classList.remove('open');
+  }
+
+  async function saveEdit(e) {
+    e.preventDefault();
+    const id = document.getElementById('e-id').value;
+    const due = document.getElementById('e-due').value;
+    const reminder = document.getElementById('e-reminder').value;
+
+    const payload = {
+      title: document.getElementById('e-title').value.trim(),
+      description: document.getElementById('e-desc').value.trim(),
+      priority: document.getElementById('e-priority').value,
+      recurrence: document.getElementById('e-recurrence').value,
+      recurrence_interval: parseInt(document.getElementById('e-interval').value) || 1,
+      due_date: due ? new Date(due).toISOString() : null,
+      reminder_start: reminder ? new Date(reminder).toISOString() : null,
+      escalation_minutes: document.getElementById('e-escalation').value,
+      tags: document.getElementById('e-tags').value.trim(),
+    };
+
+    try {
+      const r = await fetch(`/api/tasks/${id}`, {
+        method: 'PUT',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      toast('💾 Task updated!', 'success');
+      closeEditModalDirect();
+      loadTasks();
+    } catch(err) {
+      toast('Failed to update: ' + err.message, 'error');
+    }
+  }
+
+  // ── Snooze Modal ──────────────────────────────────────────────────────────
+
+  function openSnooze(id) {
+    document.getElementById('snooze-id').value = id;
+    document.getElementById('snooze-custom').value = '';
+    document.getElementById('snooze-modal').classList.add('open');
+  }
+
+  function closeSnoozeModal(e) {
+    if (e.target === document.getElementById('snooze-modal')) closeSnoozeModalDirect();
+  }
+  function closeSnoozeModalDirect() {
+    document.getElementById('snooze-modal').classList.remove('open');
+  }
+
+  async function doSnooze(minutes) {
+    if (!minutes || isNaN(minutes) || minutes < 1) {
+      toast('Enter a valid snooze duration', 'error');
+      return;
+    }
+    const id = document.getElementById('snooze-id').value;
+    try {
+      const r = await fetch(`/api/tasks/${id}/snooze`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({minutes}),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      toast(`😴 Snoozed for ${minutes} minutes`, 'success');
+      closeSnoozeModalDirect();
+      loadTasks();
+    } catch(err) {
+      toast('Failed to snooze: ' + err.message, 'error');
+    }
+  }
+
+  // ── Toast ─────────────────────────────────────────────────────────────────
+
+  let toastTimer;
+  function toast(msg, type='success') {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = `show ${type}`;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.className = ''; }, 3000);
+  }
+</script>
+</body>
+</html>
