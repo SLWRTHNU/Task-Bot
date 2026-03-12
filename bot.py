@@ -1,10 +1,13 @@
 """Telegram bot handlers and escalating reminder logic for ADHD Task Bot."""
 
 import os
+import json
 import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
+
+import anthropic
 
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -148,6 +151,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Commands:</b>\n"
         "/tasks — View all pending tasks\n"
         "/add — Add a new task\n"
+        "/ask — Add a task using natural language (AI-powered)\n"
         "/done &lt;id&gt; — Complete a task\n"
         "/snooze &lt;id&gt; [minutes] — Snooze a task\n"
         "/delete &lt;id&gt; — Delete a task\n"
@@ -301,6 +305,111 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🗑️ Task <b>#{task_id}</b> deleted: {task['title']}", parse_mode="HTML")
 
 
+_ASK_SYSTEM_PROMPT = """\
+You are a task parser. The user will describe a task in natural language.
+Extract the following fields and return ONLY a valid JSON object with these keys:
+- "title": short task title (string, required)
+- "due_date": ISO 8601 datetime string (e.g. "2024-06-15T10:00:00") or null if not specified
+- "recurrence": one of "none", "hourly", "daily", "weekly", "monthly" (default "none")
+- "recurrence_interval": integer >= 1, how many units between recurrences (default 1)
+- "priority": one of "low", "medium", "high", "urgent" (default "medium")
+- "tags": comma-separated tag string or empty string
+
+Today's date and time is {now}. Use it to resolve relative dates like "tomorrow", "next Sunday", etc.
+Return ONLY the JSON object, no explanation, no markdown fences."""
+
+
+async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Create a task from natural language: /ask <description>"""
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Usage: /ask <natural language task description>\n"
+            "Example: /ask clean the bathrooms every Sunday at 10am high priority"
+        )
+        return
+
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        await update.message.reply_text(
+            "⚠️ ANTHROPIC_API_KEY is not set. Please add it to your environment."
+        )
+        return
+
+    user_text = " ".join(args)
+    now_str = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    system_prompt = _ASK_SYSTEM_PROMPT.format(now=now_str)
+
+    await update.message.reply_text("🤔 Parsing your task...", parse_mode="HTML")
+
+    try:
+        client = anthropic.AsyncAnthropic(api_key=api_key)
+        response = await client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=512,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_text}],
+        )
+        raw = response.content[0].text.strip()
+        parsed = json.loads(raw)
+    except anthropic.AuthenticationError:
+        await update.message.reply_text("⚠️ Invalid ANTHROPIC_API_KEY. Please check your key.")
+        return
+    except anthropic.APIStatusError as e:
+        logger.error(f"/ask API error: {e}")
+        await update.message.reply_text(f"⚠️ Claude API error ({e.status_code}). Please try again.")
+        return
+    except anthropic.APIConnectionError:
+        logger.error("/ask connection error")
+        await update.message.reply_text("⚠️ Could not reach the Claude API. Check your network.")
+        return
+    except (json.JSONDecodeError, KeyError, IndexError) as e:
+        logger.error(f"/ask JSON parse error: {e}")
+        await update.message.reply_text("⚠️ Couldn't parse Claude's response. Please rephrase and try again.")
+        return
+
+    title = parsed.get("title", user_text)
+    due_date = parsed.get("due_date") or None
+    recurrence = parsed.get("recurrence", "none")
+    recurrence_interval = int(parsed.get("recurrence_interval") or 1)
+    priority = parsed.get("priority", "medium")
+    tags = parsed.get("tags", "") or ""
+
+    # Set reminder_start to due_date if given, else 5 minutes from now
+    if due_date:
+        reminder_start = due_date
+    else:
+        reminder_start = (datetime.now() + timedelta(minutes=5)).isoformat()
+
+    task_id = await db.create_task(
+        title=title,
+        recurrence=recurrence,
+        recurrence_interval=recurrence_interval,
+        due_date=due_date,
+        reminder_start=reminder_start,
+        priority=priority,
+        tags=tags,
+    )
+
+    # Build a plain-English confirmation
+    p_emoji = PRIORITY_EMOJI.get(priority, "🟡")
+    parts = [f"✅ Task <b>#{task_id}</b> created: <b>{title}</b>"]
+    if due_date:
+        try:
+            due_dt = datetime.fromisoformat(due_date)
+            parts.append(f"📅 Due: {due_dt.strftime('%A, %b %d at %I:%M %p')}")
+        except ValueError:
+            parts.append(f"📅 Due: {due_date}")
+    if recurrence != "none":
+        interval_str = f"every {recurrence_interval} " if recurrence_interval > 1 else "every "
+        parts.append(f"🔁 Repeats: {interval_str}{recurrence}")
+    parts.append(f"{p_emoji} Priority: {priority}")
+    if tags:
+        parts.append(f"🏷️ Tags: {tags}")
+
+    await update.message.reply_text("\n".join(parts), parse_mode="HTML")
+
+
 # ── Callback query handlers ───────────────────────────────────────────────────
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -358,6 +467,7 @@ def create_bot_app() -> Application:
     app.add_handler(CommandHandler("tasks", cmd_tasks))
     app.add_handler(CommandHandler("all", cmd_all))
     app.add_handler(CommandHandler("add", cmd_add))
+    app.add_handler(CommandHandler("ask", cmd_ask))
     app.add_handler(CommandHandler("done", cmd_done))
     app.add_handler(CommandHandler("snooze", cmd_snooze))
     app.add_handler(CommandHandler("delete", cmd_delete))
