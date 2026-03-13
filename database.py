@@ -4,9 +4,16 @@ import aiosqlite
 import asyncio
 from datetime import datetime, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
 import os
 
 DB_PATH = os.getenv("DATABASE_PATH", "tasks.db")
+LOCAL_TZ = ZoneInfo(os.getenv("TIMEZONE", "America/Toronto"))
+
+
+def local_now() -> datetime:
+    """Return current datetime in local timezone as a naive datetime (for DB storage)."""
+    return datetime.now(LOCAL_TZ).replace(tzinfo=None)
 
 CREATE_TASKS_TABLE = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -17,7 +24,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     recurrence_interval INTEGER DEFAULT 1,
     due_date TEXT,
     reminder_start TEXT,
-    reminder_escalation_minutes TEXT DEFAULT '0,30,60,120,240',
+    reminder_escalation_minutes TEXT DEFAULT '0,30,30,60,60',
     current_escalation_level INTEGER DEFAULT 0,
     last_reminder_sent TEXT,
     status TEXT DEFAULT 'pending',
@@ -46,6 +53,11 @@ async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(CREATE_TASKS_TABLE)
         await db.execute(CREATE_REMINDER_LOG_TABLE)
+        # Migrate existing tasks from old default escalation schedule
+        await db.execute(
+            "UPDATE tasks SET reminder_escalation_minutes = '0,30,30,60,60' "
+            "WHERE reminder_escalation_minutes = '0,30,60,120,240'"
+        )
         await db.commit()
 
 
@@ -82,7 +94,7 @@ async def create_task(
     recurrence_interval: int = 1,
     due_date: Optional[str] = None,
     reminder_start: Optional[str] = None,
-    escalation_minutes: str = "0,30,60,120,240",
+    escalation_minutes: str = "0,30,30,60,60",
     priority: str = "medium",
     tags: str = "",
 ):
@@ -119,7 +131,7 @@ async def complete_task(task_id: int):
     if not task:
         return None
 
-    now = datetime.now()
+    now = local_now()
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "UPDATE tasks SET status = 'completed', completed_at = ?, current_escalation_level = 0 WHERE id = ?",
@@ -156,7 +168,7 @@ async def delete_task(task_id: int):
 
 async def snooze_task(task_id: int, minutes: int = 30):
     """Snooze a task's reminders for N minutes."""
-    snoozed_until = (datetime.now() + timedelta(minutes=minutes)).isoformat()
+    snoozed_until = (local_now() + timedelta(minutes=minutes)).isoformat()
     await update_task(task_id, snoozed_until=snoozed_until, current_escalation_level=0)
 
 
@@ -172,7 +184,7 @@ async def log_reminder(task_id: int, escalation_level: int, message: str):
 
 async def get_due_tasks():
     """Get tasks that are pending and due for a reminder."""
-    now = datetime.now().isoformat()
+    now = local_now().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
@@ -193,7 +205,7 @@ def calculate_next_due(task: dict) -> str:
     try:
         base_dt = datetime.fromisoformat(base)
     except (ValueError, TypeError):
-        base_dt = datetime.now()
+        base_dt = local_now()
 
     interval = task.get("recurrence_interval", 1) or 1
     recurrence = task.get("recurrence", "daily")

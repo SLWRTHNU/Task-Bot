@@ -18,6 +18,7 @@ from telegram.ext import (
 from telegram.error import TelegramError
 
 import database as db
+from database import local_now
 
 logger = logging.getLogger(__name__)
 
@@ -25,17 +26,18 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = int(os.getenv("TELEGRAM_CHAT_ID", "0"))
 
 # Escalation messages — progressively harsher to cut through ADHD avoidance
+# Schedule: 0h (due), +30min, +1h, +2h, +3h, +4h, ...
 ESCALATION_MESSAGES = [
-    # Level 0 — motivating
-    "You've got this. Take 5 minutes right now and knock it out — future you will be grateful.",
-    # Level 1 — firmer
-    "Still here. Still waiting. Every time you push this off, it takes up more space in your head. Just start — you don't have to finish perfectly, you just have to start.",
-    # Level 2 — direct and uncomfortable
-    "You've now ignored this multiple times. This is the pattern that makes you feel behind and overwhelmed. Break it. Do this one thing right now.",
-    # Level 3 — blunt
-    "This keeps getting pushed back because some part of you thinks it'll be easier later. It won't. You are actively making your life harder by not doing this. Stop it.",
-    # Level 4 — no mercy
-    "You have let this sit long enough to get a full guilt spiral going. That's on you. The only way out is through — do it now, not because it feels good, but because you are someone who follows through.",
+    # Level 0 — gentle nudge (sent at due time)
+    "Hey. This is your reminder. Take a moment right now and get it done — you've totally got this. 💪",
+    # Level 1 — firmer (+30 min)
+    "Still waiting on this one. 30 minutes have gone by. The longer it sits, the heavier it gets. Just start — even badly — right now.",
+    # Level 2 — direct, no sugarcoating (+1 hour)
+    "An hour. This has been sitting for an hour. This is exactly how things pile up and you end up overwhelmed. Stop. Do it now.",
+    # Level 3 — blunt and confrontational (+2 hours)
+    "Two hours. You've had two full hours to handle this and you haven't. That's a choice you keep making. Make a different one. Right now. No more waiting.",
+    # Level 4 — no mercy, repeated every hour after (+3h, +4h, ...)
+    "You are STILL ignoring this. Every hour you don't do it, you feel worse — more guilty, more behind, more stuck. That feeling doesn't go away on its own. Only you can end it. DO IT NOW.",
 ]
 
 PRIORITY_EMOJI = {
@@ -116,14 +118,14 @@ async def send_reminder(bot: Bot, task: dict):
         await db.log_reminder(task["id"], level, message)
 
         # Advance escalation level for next reminder
-        next_level = min(level + 1, len(ESCALATION_TEMPLATES) - 1)
+        next_level = min(level + 1, len(ESCALATION_MESSAGES) - 1)
         next_interval = intervals[min(next_level, len(intervals) - 1)]
-        next_reminder = (datetime.now() + timedelta(minutes=next_interval)).isoformat()
+        next_reminder = (local_now() + timedelta(minutes=next_interval)).isoformat()
 
         await db.update_task(
             task["id"],
             current_escalation_level=next_level,
-            last_reminder_sent=datetime.now().isoformat(),
+            last_reminder_sent=local_now().isoformat(),
             reminder_start=next_reminder,
         )
         logger.info(f"Sent level-{level} reminder for task {task['id']}: {task['title']}")
@@ -230,7 +232,7 @@ async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     title = " ".join(args)
     # Default: remind in 5 minutes
-    reminder_start = (datetime.now() + timedelta(minutes=5)).isoformat()
+    reminder_start = (local_now() + timedelta(minutes=5)).isoformat()
     task_id = await db.create_task(
         title=title,
         reminder_start=reminder_start,
@@ -283,7 +285,7 @@ async def cmd_snooze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await db.snooze_task(task_id, minutes)
     await update.message.reply_text(
         f"😴 Task <b>#{task_id}</b> snoozed for {minutes} minutes.\n"
-        f"I'll remind you again at {(datetime.now() + timedelta(minutes=minutes)).strftime('%H:%M')}.",
+        f"I'll remind you again at {(local_now() + timedelta(minutes=minutes)).strftime('%H:%M')}.",
         parse_mode="HTML"
     )
 
@@ -380,7 +382,7 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if due_date:
         reminder_start = due_date
     else:
-        reminder_start = (datetime.now() + timedelta(minutes=5)).isoformat()
+        reminder_start = (local_now() + timedelta(minutes=5)).isoformat()
 
     task_id = await db.create_task(
         title=title,
@@ -440,7 +442,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("Task not found.")
             return
         await db.snooze_task(task_id, minutes)
-        wake_time = (datetime.now() + timedelta(minutes=minutes)).strftime("%H:%M")
+        wake_time = (local_now() + timedelta(minutes=minutes)).strftime("%H:%M")
         await query.edit_message_text(
             f"😴 Snoozed <b>{task['title']}</b> for {minutes} min.\n"
             f"I'll nudge you again at {wake_time}.",
