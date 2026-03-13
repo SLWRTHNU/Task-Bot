@@ -358,6 +358,12 @@
       .task-actions { grid-column: 1 / -1; }
     }
   </style>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css" />
+  <style>
+    .flatpickr-calendar { font-family: inherit; }
+    .flatpickr-input { cursor: pointer; }
+  </style>
 </head>
 <body>
 
@@ -903,6 +909,12 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { el.className = ''; }, 3000);
   }
+</script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script>
+  const fpConfig = { dateFormat: 'Y-m-d', disableMobile: false };
+  flatpickr('#f-due-date', fpConfig);
+  flatpickr('#e-due-date', fpConfig);
 </script>
 </body>
 </html>
