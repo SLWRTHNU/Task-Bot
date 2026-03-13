@@ -84,12 +84,8 @@ def build_task_keyboard(task_id: int, escalation_level: int) -> InlineKeyboardMa
     """Build inline keyboard for a task reminder."""
     buttons = [
         [
-            InlineKeyboardButton("✅ Done!", callback_data=f"done:{task_id}"),
-            InlineKeyboardButton("😴 Snooze 15m", callback_data=f"snooze15:{task_id}"),
-        ],
-        [
-            InlineKeyboardButton("⏳ Snooze 1h", callback_data=f"snooze60:{task_id}"),
-            InlineKeyboardButton("📋 All Tasks", callback_data="list"),
+            InlineKeyboardButton("✅ Done", callback_data=f"done:{task_id}"),
+            InlineKeyboardButton("📅 Move to Tomorrow", callback_data=f"tomorrow:{task_id}"),
         ],
     ]
     return InlineKeyboardMarkup(buttons)
@@ -433,32 +429,28 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg += f"\n\n🔁 Recurring task regenerated as <b>#{new_id}</b>."
         await query.edit_message_text(msg, parse_mode="HTML")
 
-    elif data.startswith("snooze"):
-        parts = data.split(":")
-        minutes = int(parts[0].replace("snooze", ""))
-        task_id = int(parts[1])
+    elif data.startswith("tomorrow:"):
+        task_id = int(data.split(":")[1])
         task = await db.get_task(task_id)
         if not task:
             await query.edit_message_text("Task not found.")
             return
-        await db.snooze_task(task_id, minutes)
-        wake_time = (local_now() + timedelta(minutes=minutes)).strftime("%H:%M")
+        # Shift due_date and reminder_start forward by one day
+        now = local_now()
+        if task.get("due_date"):
+            try:
+                due = datetime.fromisoformat(task["due_date"])
+                new_due = due + timedelta(days=1)
+            except (ValueError, TypeError):
+                new_due = now.replace(hour=9, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        else:
+            new_due = now.replace(hour=9, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        new_due_str = new_due.strftime("%Y-%m-%dT%H:%M:%S")
+        await db.update_task(task_id, due_date=new_due_str, reminder_start=new_due_str, snoozed_until=None)
         await query.edit_message_text(
-            f"😴 Snoozed <b>{task['title']}</b> for {minutes} min.\n"
-            f"I'll nudge you again at {wake_time}.",
+            f"📅 Moved <b>{task['title']}</b> to tomorrow ({new_due.strftime('%b %d at %I:%M %p')}).",
             parse_mode="HTML"
         )
-
-    elif data == "list":
-        tasks = await db.get_all_tasks(status="pending")
-        if not tasks:
-            await query.edit_message_text("🎉 No pending tasks! You're all caught up.")
-            return
-        lines = ["📋 <b>Pending Tasks:</b>\n"]
-        for task in tasks:
-            p_emoji = PRIORITY_EMOJI.get(task.get("priority", "medium"), "🟡")
-            lines.append(f"{p_emoji} <b>#{task['id']}</b> {task['title']}")
-        await query.edit_message_text("\n".join(lines), parse_mode="HTML")
 
 
 def create_bot_app() -> Application:
