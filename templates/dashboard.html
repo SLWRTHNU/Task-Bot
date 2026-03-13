@@ -82,7 +82,6 @@
     .stat-card.pending .value { color: var(--yellow); }
     .stat-card.done .value { color: var(--green); }
     .stat-card.recurring .value { color: var(--accent2); }
-    .stat-card.urgent .value { color: var(--red); }
 
     /* ── Add Task Panel ── */
     .panel {
@@ -113,7 +112,7 @@
     .form-grid .full { grid-column: 1 / -1; }
 
     label { display: block; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 4px; }
-    input, select, textarea {
+    input, select {
       width: 100%;
       background: var(--bg);
       border: 1px solid var(--border);
@@ -124,11 +123,36 @@
       font-family: inherit;
       transition: border-color 0.2s;
     }
-    input:focus, select:focus, textarea:focus {
+    input:focus, select:focus {
       outline: none;
       border-color: var(--accent);
     }
-    textarea { resize: vertical; min-height: 64px; }
+
+    /* Time row: hour + minute + ampm inline */
+    .time-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .time-row input[type="number"] {
+      width: 64px;
+      text-align: center;
+      padding: 9px 6px;
+    }
+    .time-row .time-sep {
+      color: var(--text-dim);
+      font-size: 1.1rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .time-row select {
+      width: 76px;
+    }
+
+    /* Hide number spinners */
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+    input[type="number"] { -moz-appearance: textfield; }
 
     .btn {
       display: inline-flex;
@@ -202,10 +226,6 @@
     }
     .task-card:hover { border-color: var(--accent); }
     .task-card.completed { opacity: 0.5; }
-    .task-card.priority-urgent { border-left: 3px solid var(--red); }
-    .task-card.priority-high { border-left: 3px solid var(--orange); }
-    .task-card.priority-medium { border-left: 3px solid var(--yellow); }
-    .task-card.priority-low { border-left: 3px solid var(--green); }
 
     .task-check {
       width: 20px;
@@ -228,33 +248,22 @@
     .task-title {
       font-weight: 600;
       font-size: 0.95rem;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
     }
     .task-title.strikethrough { text-decoration: line-through; color: var(--text-dim); }
     .task-meta { font-size: 0.78rem; color: var(--text-dim); margin-top: 4px; display: flex; flex-wrap: wrap; gap: 8px; }
-    .task-desc { font-size: 0.85rem; color: var(--text-dim); margin-top: 6px; }
-    .tag {
-      display: inline-block;
-      padding: 1px 8px;
-      border-radius: 99px;
-      font-size: 0.72rem;
-      font-weight: 600;
-      background: var(--surface2);
-      border: 1px solid var(--border);
+
+    .escalation-bar {
+      display: flex;
+      gap: 3px;
+      margin-top: 6px;
     }
-    .badge-priority {
-      padding: 1px 7px;
-      border-radius: 4px;
-      font-size: 0.72rem;
-      font-weight: 700;
+    .escalation-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--border);
     }
-    .badge-priority.urgent { background: rgba(248,113,113,0.2); color: var(--red); }
-    .badge-priority.high { background: rgba(251,146,60,0.2); color: var(--orange); }
-    .badge-priority.medium { background: rgba(250,204,21,0.2); color: var(--yellow); }
-    .badge-priority.low { background: rgba(74,222,128,0.2); color: var(--green); }
+    .escalation-dot.active { background: var(--accent); }
+    .escalation-dot.fired { background: var(--red); }
 
     .task-actions { display: flex; gap: 6px; flex-shrink: 0; }
     .icon-btn {
@@ -273,19 +282,6 @@
     }
     .icon-btn:hover { border-color: var(--accent); color: var(--text); }
     .icon-btn.danger:hover { border-color: var(--red); color: var(--red); }
-
-    .escalation-bar {
-      display: flex;
-      gap: 3px;
-      margin-top: 6px;
-    }
-    .escalation-dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      background: var(--border);
-    }
-    .escalation-dot.active { background: var(--accent); }
-    .escalation-dot.fired { background: var(--red); }
 
     /* ── Empty state ── */
     .empty {
@@ -313,7 +309,7 @@
       border: 1px solid var(--border);
       border-radius: var(--radius);
       width: 100%;
-      max-width: 560px;
+      max-width: 520px;
       max-height: 90vh;
       overflow-y: auto;
       box-shadow: var(--shadow);
@@ -386,10 +382,6 @@
       <div class="value" id="stat-recurring">–</div>
       <div class="label">Recurring</div>
     </div>
-    <div class="stat-card urgent">
-      <div class="value" id="stat-urgent">–</div>
-      <div class="label">Urgent</div>
-    </div>
   </div>
 
   <!-- Add Task Panel -->
@@ -406,49 +398,37 @@
             <label>Task Title *</label>
             <input type="text" id="f-title" placeholder="e.g. Take medication" required />
           </div>
-          <div class="full">
-            <label>Description</label>
-            <textarea id="f-desc" placeholder="Optional details..."></textarea>
-          </div>
-          <div>
-            <label>Priority</label>
-            <select id="f-priority">
-              <option value="low">🟢 Low</option>
-              <option value="medium" selected>🟡 Medium</option>
-              <option value="high">🔴 High</option>
-              <option value="urgent">💥 Urgent</option>
-            </select>
-          </div>
+
           <div>
             <label>Recurrence</label>
-            <select id="f-recurrence" onchange="toggleInterval()">
+            <select id="f-recurrence" onchange="toggleRecurrence('f')">
               <option value="none">None (one-time)</option>
-              <option value="hourly">Hourly</option>
               <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
               <option value="monthly">Monthly</option>
+              <option value="custom">Custom (every N days)</option>
             </select>
           </div>
-          <div id="interval-group" style="display:none">
-            <label>Every N (interval)</label>
-            <input type="number" id="f-interval" value="1" min="1" max="365" />
+          <div id="f-custom-group" style="display:none">
+            <label>Every N days</label>
+            <input type="number" id="f-interval" value="2" min="1" max="365" />
+          </div>
+
+          <div>
+            <label>Due Date</label>
+            <input type="date" id="f-due-date" />
           </div>
           <div>
-            <label>Due Date &amp; Time</label>
-            <input type="datetime-local" id="f-due" />
-          </div>
-          <div>
-            <label>First Reminder</label>
-            <input type="datetime-local" id="f-reminder" />
-          </div>
-          <div>
-            <label>Tags (comma-separated)</label>
-            <input type="text" id="f-tags" placeholder="work, health, meds" />
-          </div>
-          <div>
-            <label>Escalation (minutes, comma-sep)</label>
-            <input type="text" id="f-escalation" value="0,30,60,120,240"
-                   placeholder="0,30,60,120,240" />
+            <label>Due Time</label>
+            <div class="time-row">
+              <input type="number" id="f-hour" value="12" min="1" max="12" placeholder="12" />
+              <span class="time-sep">:</span>
+              <input type="number" id="f-minute" value="0" min="0" max="59" placeholder="00" />
+              <select id="f-ampm">
+                <option value="PM">PM</option>
+                <option value="AM">AM</option>
+              </select>
+            </div>
           </div>
         </div>
         <div class="form-actions">
@@ -488,48 +468,37 @@
             <label>Title</label>
             <input type="text" id="e-title" required />
           </div>
-          <div class="full">
-            <label>Description</label>
-            <textarea id="e-desc"></textarea>
-          </div>
-          <div>
-            <label>Priority</label>
-            <select id="e-priority">
-              <option value="low">🟢 Low</option>
-              <option value="medium">🟡 Medium</option>
-              <option value="high">🔴 High</option>
-              <option value="urgent">💥 Urgent</option>
-            </select>
-          </div>
+
           <div>
             <label>Recurrence</label>
-            <select id="e-recurrence">
-              <option value="none">None</option>
-              <option value="hourly">Hourly</option>
+            <select id="e-recurrence" onchange="toggleRecurrence('e')">
+              <option value="none">None (one-time)</option>
               <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
               <option value="monthly">Monthly</option>
+              <option value="custom">Custom (every N days)</option>
             </select>
           </div>
-          <div>
-            <label>Interval</label>
-            <input type="number" id="e-interval" value="1" min="1" />
+          <div id="e-custom-group" style="display:none">
+            <label>Every N days</label>
+            <input type="number" id="e-interval" value="2" min="1" max="365" />
           </div>
+
           <div>
             <label>Due Date</label>
-            <input type="datetime-local" id="e-due" />
+            <input type="date" id="e-due-date" />
           </div>
           <div>
-            <label>Next Reminder</label>
-            <input type="datetime-local" id="e-reminder" />
-          </div>
-          <div>
-            <label>Tags</label>
-            <input type="text" id="e-tags" />
-          </div>
-          <div>
-            <label>Escalation Minutes</label>
-            <input type="text" id="e-escalation" />
+            <label>Due Time</label>
+            <div class="time-row">
+              <input type="number" id="e-hour" value="12" min="1" max="12" placeholder="12" />
+              <span class="time-sep">:</span>
+              <input type="number" id="e-minute" value="0" min="0" max="59" placeholder="00" />
+              <select id="e-ampm">
+                <option value="PM">PM</option>
+                <option value="AM">AM</option>
+              </select>
+            </div>
           </div>
         </div>
         <div class="form-actions" style="margin-top:16px">
@@ -581,21 +550,60 @@
   document.addEventListener('DOMContentLoaded', () => {
     loadStats();
     loadTasks();
-    setDefaultDates();
-    setInterval(() => { loadStats(); loadTasks(); }, 30000); // refresh every 30s
+    setDefaultDateTime('f');
+    setInterval(() => { loadStats(); loadTasks(); }, 30000);
   });
 
-  function setDefaultDates() {
+  function setDefaultDateTime(prefix) {
     const now = new Date();
-    now.setMinutes(now.getMinutes() + 60);
-    const local = toLocalInputValue(now);
-    document.getElementById('f-due').value = local;
-    document.getElementById('f-reminder').value = local;
+    now.setHours(now.getHours() + 1, 0, 0, 0); // round to next hour
+    const pad = n => String(n).padStart(2, '0');
+    const dateStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+    document.getElementById(prefix + '-due-date').value = dateStr;
+    let h = now.getHours();
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    document.getElementById(prefix + '-hour').value = h;
+    document.getElementById(prefix + '-minute').value = 0;
+    document.getElementById(prefix + '-ampm').value = ampm;
   }
 
-  function toLocalInputValue(d) {
+  function buildDueDate(prefix) {
+    const date = document.getElementById(prefix + '-due-date').value;
+    if (!date) return null;
+    let hour = parseInt(document.getElementById(prefix + '-hour').value) || 12;
+    const minute = parseInt(document.getElementById(prefix + '-minute').value) || 0;
+    const ampm = document.getElementById(prefix + '-ampm').value;
+    if (ampm === 'PM' && hour !== 12) hour += 12;
+    if (ampm === 'AM' && hour === 12) hour = 0;
     const pad = n => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    return `${date}T${pad(hour)}:${pad(minute)}:00`;
+  }
+
+  function setDateTimeFields(prefix, isoStr) {
+    if (!isoStr) return;
+    // isoStr is a naive local datetime like "2026-03-13T15:00:00"
+    const [datePart, timePart] = isoStr.split('T');
+    if (!datePart) return;
+    document.getElementById(prefix + '-due-date').value = datePart;
+    if (timePart) {
+      const [hStr, mStr] = timePart.split(':');
+      let h = parseInt(hStr) || 0;
+      const m = parseInt(mStr) || 0;
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      h = h % 12 || 12;
+      document.getElementById(prefix + '-hour').value = h;
+      document.getElementById(prefix + '-minute').value = m;
+      document.getElementById(prefix + '-ampm').value = ampm;
+    }
+  }
+
+  // ── Recurrence toggle ─────────────────────────────────────────────────────
+
+  function toggleRecurrence(prefix) {
+    const v = document.getElementById(prefix + '-recurrence').value;
+    document.getElementById(prefix + '-custom-group').style.display =
+      v === 'custom' ? 'block' : 'none';
   }
 
   // ── Data Loading ──────────────────────────────────────────────────────────
@@ -607,7 +615,6 @@
       document.getElementById('stat-pending').textContent = data.pending;
       document.getElementById('stat-done').textContent = data.completed;
       document.getElementById('stat-recurring').textContent = data.recurring;
-      document.getElementById('stat-urgent').textContent = data.by_priority.urgent + data.by_priority.high;
       document.getElementById('pending-badge').textContent = `${data.pending} pending`;
     } catch(e) { console.error('Stats error:', e); }
   }
@@ -639,16 +646,10 @@
 
   function renderTasks() {
     let tasks = allTasks;
-
     if (currentFilter === 'pending') tasks = tasks.filter(t => t.status === 'pending');
     else if (currentFilter === 'completed') tasks = tasks.filter(t => t.status === 'completed');
-
     if (searchQuery) {
-      tasks = tasks.filter(t =>
-        t.title.toLowerCase().includes(searchQuery) ||
-        (t.description || '').toLowerCase().includes(searchQuery) ||
-        (t.tags || '').toLowerCase().includes(searchQuery)
-      );
+      tasks = tasks.filter(t => t.title.toLowerCase().includes(searchQuery));
     }
 
     const container = document.getElementById('task-list');
@@ -662,15 +663,11 @@
       </div>`;
       return;
     }
-
     container.innerHTML = tasks.map(renderTaskCard).join('');
   }
 
   function renderTaskCard(t) {
-    const priority = t.priority || 'medium';
     const isDone = t.status === 'completed';
-    const escalation = t.reminder_escalation_minutes
-      ? t.reminder_escalation_minutes.split(',').length : 5;
     const currentLevel = t.current_escalation_level || 0;
 
     const dots = Array.from({length: 5}, (_, i) => {
@@ -682,34 +679,27 @@
     let metaParts = [];
     if (t.due_date) {
       try {
-        const d = new Date(t.due_date);
+        // Parse naive local datetime string directly
+        const d = parseLocalDate(t.due_date);
         const isOverdue = !isDone && d < new Date();
         metaParts.push(`<span style="color:${isOverdue ? 'var(--red)' : ''}">📅 ${formatDate(d)}</span>`);
       } catch(e) {}
     }
     if (t.recurrence && t.recurrence !== 'none') {
-      const interval = t.recurrence_interval > 1 ? ` ×${t.recurrence_interval}` : '';
+      const interval = t.recurrence_interval > 1 ? ` every ${t.recurrence_interval}` : '';
       metaParts.push(`🔁 ${t.recurrence}${interval}`);
     }
-    if (t.snoozed_until && new Date(t.snoozed_until) > new Date()) {
-      metaParts.push(`😴 snoozed until ${formatDate(new Date(t.snoozed_until))}`);
+    if (t.snoozed_until && parseLocalDate(t.snoozed_until) > new Date()) {
+      metaParts.push(`😴 snoozed until ${formatDate(parseLocalDate(t.snoozed_until))}`);
     }
-    const tags = t.tags ? t.tags.split(',').filter(Boolean).map(tag =>
-      `<span class="tag">${tag.trim()}</span>`
-    ).join(' ') : '';
 
     return `
-    <div class="task-card priority-${priority} ${isDone ? 'completed' : ''}" id="task-${t.id}">
+    <div class="task-card ${isDone ? 'completed' : ''}" id="task-${t.id}">
       <button class="task-check ${isDone ? 'checked' : ''}" onclick="completeTask(${t.id})" title="Mark complete">
         ${isDone ? '✓' : ''}
       </button>
       <div class="task-body">
-        <div class="task-title ${isDone ? 'strikethrough' : ''}">
-          ${escHtml(t.title)}
-          <span class="badge-priority ${priority}">${priority}</span>
-          ${tags}
-        </div>
-        ${t.description ? `<div class="task-desc">${escHtml(t.description)}</div>` : ''}
+        <div class="task-title ${isDone ? 'strikethrough' : ''}">${escHtml(t.title)}</div>
         <div class="task-meta">${metaParts.join(' · ')}</div>
         ${!isDone ? `<div class="escalation-bar" title="Reminder escalation level">${dots}</div>` : ''}
       </div>
@@ -721,17 +711,23 @@
     </div>`;
   }
 
+  // Parse a naive local ISO datetime string without applying UTC offset
+  function parseLocalDate(s) {
+    if (!s) return new Date(NaN);
+    // "2026-03-13T15:00:00" → treat as local time
+    const [date, time] = s.split('T');
+    const [y, mo, d] = date.split('-').map(Number);
+    const [h, m, sec] = (time || '00:00:00').split(':').map(Number);
+    return new Date(y, mo - 1, d, h || 0, m || 0, sec || 0);
+  }
+
   function formatDate(d) {
     const now = new Date();
     const diff = d - now;
     if (Math.abs(diff) < 60000) return 'just now';
-    if (diff > 0 && diff < 86400000) {
-      return `in ${Math.round(diff/60000)}m`;
-    }
-    if (diff < 0 && diff > -86400000) {
-      return `${Math.round(-diff/60000)}m ago`;
-    }
-    return d.toLocaleDateString(undefined, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    if (diff > 0 && diff < 86400000) return `in ${Math.round(diff/60000)}m`;
+    if (diff < 0 && diff > -86400000) return `${Math.round(-diff/60000)}m ago`;
+    return d.toLocaleDateString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
   }
 
   function escHtml(s) {
@@ -768,32 +764,24 @@
     chevron.textContent = collapsed ? '▶' : '▼';
   }
 
-  function toggleInterval() {
-    const v = document.getElementById('f-recurrence').value;
-    document.getElementById('interval-group').style.display = v === 'none' ? 'none' : 'block';
-  }
-
   function resetForm() {
     document.getElementById('add-form').reset();
-    setDefaultDates();
-    document.getElementById('f-escalation').value = '0,30,60,120,240';
+    document.getElementById('f-custom-group').style.display = 'none';
+    setDefaultDateTime('f');
   }
 
   async function submitTask(e) {
     e.preventDefault();
-    const due = document.getElementById('f-due').value;
-    const reminder = document.getElementById('f-reminder').value;
+    const due_date = buildDueDate('f');
+    const rec = document.getElementById('f-recurrence').value;
+    const isCustom = rec === 'custom';
 
     const payload = {
       title: document.getElementById('f-title').value.trim(),
-      description: document.getElementById('f-desc').value.trim(),
-      priority: document.getElementById('f-priority').value,
-      recurrence: document.getElementById('f-recurrence').value,
-      recurrence_interval: parseInt(document.getElementById('f-interval').value) || 1,
-      due_date: due ? new Date(due).toISOString() : null,
-      reminder_start: reminder ? new Date(reminder).toISOString() : null,
-      escalation_minutes: document.getElementById('f-escalation').value,
-      tags: document.getElementById('f-tags').value.trim(),
+      recurrence: isCustom ? 'daily' : rec,
+      recurrence_interval: isCustom ? (parseInt(document.getElementById('f-interval').value) || 2) : 1,
+      due_date: due_date,
+      reminder_start: due_date,
     };
 
     try {
@@ -818,18 +806,21 @@
     if (!t) return;
     document.getElementById('e-id').value = t.id;
     document.getElementById('e-title').value = t.title;
-    document.getElementById('e-desc').value = t.description || '';
-    document.getElementById('e-priority').value = t.priority || 'medium';
-    document.getElementById('e-recurrence').value = t.recurrence || 'none';
-    document.getElementById('e-interval').value = t.recurrence_interval || 1;
-    document.getElementById('e-tags').value = t.tags || '';
-    document.getElementById('e-escalation').value = t.reminder_escalation_minutes || '0,30,60,120,240';
-    if (t.due_date) {
-      try { document.getElementById('e-due').value = toLocalInputValue(new Date(t.due_date)); } catch(e){}
+
+    // Recurrence: if daily with interval > 1, show as custom
+    const rec = t.recurrence || 'none';
+    const interval = t.recurrence_interval || 1;
+    if (rec === 'daily' && interval > 1) {
+      document.getElementById('e-recurrence').value = 'custom';
+      document.getElementById('e-interval').value = interval;
+      document.getElementById('e-custom-group').style.display = 'block';
+    } else {
+      document.getElementById('e-recurrence').value = rec;
+      document.getElementById('e-interval').value = interval;
+      document.getElementById('e-custom-group').style.display = 'none';
     }
-    if (t.reminder_start) {
-      try { document.getElementById('e-reminder').value = toLocalInputValue(new Date(t.reminder_start)); } catch(e){}
-    }
+
+    setDateTimeFields('e', t.due_date || t.reminder_start || '');
     document.getElementById('edit-modal').classList.add('open');
   }
 
@@ -843,19 +834,16 @@
   async function saveEdit(e) {
     e.preventDefault();
     const id = document.getElementById('e-id').value;
-    const due = document.getElementById('e-due').value;
-    const reminder = document.getElementById('e-reminder').value;
+    const due_date = buildDueDate('e');
+    const rec = document.getElementById('e-recurrence').value;
+    const isCustom = rec === 'custom';
 
     const payload = {
       title: document.getElementById('e-title').value.trim(),
-      description: document.getElementById('e-desc').value.trim(),
-      priority: document.getElementById('e-priority').value,
-      recurrence: document.getElementById('e-recurrence').value,
-      recurrence_interval: parseInt(document.getElementById('e-interval').value) || 1,
-      due_date: due ? new Date(due).toISOString() : null,
-      reminder_start: reminder ? new Date(reminder).toISOString() : null,
-      escalation_minutes: document.getElementById('e-escalation').value,
-      tags: document.getElementById('e-tags').value.trim(),
+      recurrence: isCustom ? 'daily' : rec,
+      recurrence_interval: isCustom ? (parseInt(document.getElementById('e-interval').value) || 2) : 1,
+      due_date: due_date,
+      reminder_start: due_date,
     };
 
     try {
