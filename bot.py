@@ -6,6 +6,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import anthropic
 
@@ -336,7 +337,8 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user_text = " ".join(args)
-    now_str = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    tz = ZoneInfo(os.getenv("TIMEZONE", "UTC"))
+    now_str = datetime.now(tz).strftime("%Y-%m-%dT%H:%M:%S %Z")
     system_prompt = _ASK_SYSTEM_PROMPT.format(now=now_str)
 
     await update.message.reply_text("🤔 Parsing your task...", parse_mode="HTML")
