@@ -85,7 +85,7 @@ def build_task_keyboard(task_id: int, escalation_level: int) -> InlineKeyboardMa
     buttons = [
         [
             InlineKeyboardButton("✅ Done", callback_data=f"done:{task_id}"),
-            InlineKeyboardButton("📅 Move to Tomorrow", callback_data=f"tomorrow:{task_id}"),
+            InlineKeyboardButton("⏳ Push 24h", callback_data=f"tomorrow:{task_id}"),
         ],
     ]
     return InlineKeyboardMarkup(buttons)
