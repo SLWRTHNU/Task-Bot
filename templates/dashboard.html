@@ -421,9 +421,9 @@
           <div>
             <label>Due Time</label>
             <div class="time-row">
-              <input type="number" id="f-hour" value="12" min="1" max="12" placeholder="12" />
+              <input type="number" id="f-hour" min="1" max="12" placeholder="12" />
               <span class="time-sep">:</span>
-              <input type="number" id="f-minute" value="0" min="0" max="59" placeholder="00" />
+              <input type="number" id="f-minute" min="0" max="59" placeholder="00" />
               <select id="f-ampm">
                 <option value="PM">PM</option>
                 <option value="AM">AM</option>
@@ -491,9 +491,9 @@
           <div>
             <label>Due Time</label>
             <div class="time-row">
-              <input type="number" id="e-hour" value="12" min="1" max="12" placeholder="12" />
+              <input type="number" id="e-hour" min="1" max="12" placeholder="12" />
               <span class="time-sep">:</span>
-              <input type="number" id="e-minute" value="0" min="0" max="59" placeholder="00" />
+              <input type="number" id="e-minute" min="0" max="59" placeholder="00" />
               <select id="e-ampm">
                 <option value="PM">PM</option>
                 <option value="AM">AM</option>
@@ -560,12 +560,8 @@
     const pad = n => String(n).padStart(2, '0');
     const dateStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
     document.getElementById(prefix + '-due-date').value = dateStr;
-    let h = now.getHours();
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    h = h % 12 || 12;
-    document.getElementById(prefix + '-hour').value = h;
-    document.getElementById(prefix + '-minute').value = 0;
-    document.getElementById(prefix + '-ampm').value = ampm;
+    document.getElementById(prefix + '-hour').value = '';
+    document.getElementById(prefix + '-minute').value = '';
   }
 
   function buildDueDate(prefix) {
