@@ -92,7 +92,7 @@ def build_task_keyboard(task_id: int, escalation_level: int) -> InlineKeyboardMa
 
 
 async def send_reminder(bot: Bot, task: dict):
-    """Send an escalating reminder for a task."""
+    """Send an escalating reminder for a task, deleting the previous one first."""
     level = task.get("current_escalation_level", 0)
     escalation_minutes = task.get("reminder_escalation_minutes", "0,30,60,120,240")
 
@@ -104,8 +104,16 @@ async def send_reminder(bot: Bot, task: dict):
     message = build_task_message(task, level)
     keyboard = build_task_keyboard(task["id"], level)
 
+    # Delete the previous reminder message for this task (if any)
+    old_msg_id = task.get("last_message_id")
+    if old_msg_id:
+        try:
+            await bot.delete_message(chat_id=CHAT_ID, message_id=old_msg_id)
+        except TelegramError:
+            pass  # Already deleted or too old — ignore
+
     try:
-        await bot.send_message(
+        sent = await bot.send_message(
             chat_id=CHAT_ID,
             text=message,
             parse_mode="HTML",
@@ -123,6 +131,7 @@ async def send_reminder(bot: Bot, task: dict):
             current_escalation_level=next_level,
             last_reminder_sent=local_now().isoformat(),
             reminder_start=next_reminder,
+            last_message_id=sent.message_id,
         )
         logger.info(f"Sent level-{level} reminder for task {task['id']}: {task['title']}")
     except TelegramError as e:
@@ -234,12 +243,17 @@ async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reminder_start=reminder_start,
         due_date=reminder_start,
     )
-    await update.message.reply_text(
+    confirm_msg = await update.message.reply_text(
         f"✅ Task <b>#{task_id}</b> created: {title}\n"
         f"First reminder in 5 minutes!\n\n"
         f"Use the web dashboard to set recurrence and priority.",
         parse_mode="HTML"
     )
+    await asyncio.sleep(5)
+    try:
+        await confirm_msg.delete()
+    except TelegramError:
+        pass
 
 
 async def cmd_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -339,7 +353,7 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now_str = datetime.now(tz).strftime("%Y-%m-%dT%H:%M:%S %Z")
     system_prompt = _ASK_SYSTEM_PROMPT.format(now=now_str)
 
-    await update.message.reply_text("🤔 Parsing your task...", parse_mode="HTML")
+    parsing_msg = await update.message.reply_text("🤔 Parsing your task...")
 
     try:
         client = anthropic.AsyncAnthropic(api_key=api_key)
@@ -352,20 +366,26 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         raw = response.content[0].text.strip()
         parsed = json.loads(raw)
     except anthropic.AuthenticationError:
-        await update.message.reply_text("⚠️ Invalid ANTHROPIC_API_KEY. Please check your key.")
+        await parsing_msg.edit_text("⚠️ Invalid ANTHROPIC_API_KEY. Please check your key.")
         return
     except anthropic.APIStatusError as e:
         logger.error(f"/ask API error: {e}")
-        await update.message.reply_text(f"⚠️ Claude API error ({e.status_code}). Please try again.")
+        await parsing_msg.edit_text(f"⚠️ Claude API error ({e.status_code}). Please try again.")
         return
     except anthropic.APIConnectionError:
         logger.error("/ask connection error")
-        await update.message.reply_text("⚠️ Could not reach the Claude API. Check your network.")
+        await parsing_msg.edit_text("⚠️ Could not reach the Claude API. Check your network.")
         return
     except (json.JSONDecodeError, KeyError, IndexError) as e:
         logger.error(f"/ask JSON parse error: {e}")
-        await update.message.reply_text("⚠️ Couldn't parse Claude's response. Please rephrase and try again.")
+        await parsing_msg.edit_text("⚠️ Couldn't parse Claude's response. Please rephrase and try again.")
         return
+
+    # Parsing succeeded — remove the interim message
+    try:
+        await parsing_msg.delete()
+    except TelegramError:
+        pass
 
     title = parsed.get("title", user_text)
     due_date = parsed.get("due_date") or None
@@ -390,7 +410,7 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tags=tags,
     )
 
-    # Build a plain-English confirmation
+    # Build a plain-English confirmation, show briefly, then delete
     p_emoji = PRIORITY_EMOJI.get(priority, "🟡")
     parts = [f"✅ Task <b>#{task_id}</b> created: <b>{title}</b>"]
     if due_date:
@@ -406,7 +426,12 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if tags:
         parts.append(f"🏷️ Tags: {tags}")
 
-    await update.message.reply_text("\n".join(parts), parse_mode="HTML")
+    confirm_msg = await update.message.reply_text("\n".join(parts), parse_mode="HTML")
+    await asyncio.sleep(5)
+    try:
+        await confirm_msg.delete()
+    except TelegramError:
+        pass
 
 
 # ── Callback query handlers ───────────────────────────────────────────────────

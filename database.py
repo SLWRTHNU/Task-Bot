@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     completed_at TEXT,
     snoozed_until TEXT,
     priority TEXT DEFAULT 'medium',
-    tags TEXT DEFAULT ''
+    tags TEXT DEFAULT '',
+    last_message_id INTEGER DEFAULT NULL
 );
 """
 
@@ -58,6 +59,11 @@ async def init_db():
             "UPDATE tasks SET reminder_escalation_minutes = '0,30,30,60,60' "
             "WHERE reminder_escalation_minutes = '0,30,60,120,240'"
         )
+        # Migrate: add last_message_id column if missing
+        try:
+            await db.execute("ALTER TABLE tasks ADD COLUMN last_message_id INTEGER DEFAULT NULL")
+        except Exception:
+            pass  # Column already exists
         await db.commit()
 
 
