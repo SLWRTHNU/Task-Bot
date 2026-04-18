@@ -399,13 +399,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         task_id = int(data.split(":")[1])
         task = await db.get_task(task_id)
         if not task:
-            await query.edit_message_text("Task not found or already completed.")
+            await query.answer("Task not found.")
             return
-        new_id = await db.complete_task(task_id)
-        msg = f"🎉 Done! <b>{task['title']}</b>\n\nAwesome work! 💪"
-        if new_id:
-            msg += f"\n\n🔁 Recurring task regenerated as <b>#{new_id}</b>."
-        await query.edit_message_text(msg, parse_mode="HTML")
+        await db.complete_task(task_id)
+        try:
+            await query.message.delete()
+        except TelegramError:
+            pass
 
     elif data.startswith("tomorrow:"):
         task_id = int(data.split(":")[1])
