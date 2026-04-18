@@ -1,6 +1,6 @@
-# 🧠 ADHD Task Bot
+# 🧠 Task Bot
 
-A Telegram bot for managing recurring tasks with **escalating reminders** — built specifically for ADHD brains that need gentle-but-persistent nudges.
+A Telegram bot for managing recurring tasks with **escalating reminders**.
 
 ## Features
 

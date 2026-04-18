@@ -1,5 +1,5 @@
 """
-ADHD Task Bot — Main Entry Point
+Task Bot — Main Entry Point
 Runs the FastAPI web server and Telegram bot concurrently,
 with APScheduler checking for due reminders every minute.
 """
@@ -64,7 +64,7 @@ async def run_web_server():
 
 async def main():
     """Main entry point — runs everything concurrently."""
-    logger.info("🧠 ADHD Task Bot starting...")
+    logger.info("🧠 Task Bot starting...")
 
     # Initialize database
     await db.init_db()
