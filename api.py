@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 import database as db
+from database import local_now
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class TaskCreate(BaseModel):
     recurrence_interval: int = 1
     due_date: Optional[str] = None
     reminder_start: Optional[str] = None
-    escalation_minutes: str = "0,30,60,120,240"
+    escalation_minutes: str = "0,30,30,60,60"
     priority: str = "medium"
     tags: str = ""
 
@@ -82,7 +83,7 @@ async def create_task(payload: TaskCreate):
     """Create a new task."""
     # Default due date: 1 hour from now if not specified
     if not payload.due_date:
-        payload.due_date = (datetime.now() + timedelta(hours=1)).isoformat()
+        payload.due_date = (local_now() + timedelta(hours=1)).isoformat()
     if not payload.reminder_start:
         payload.reminder_start = payload.due_date
 
@@ -141,7 +142,7 @@ async def snooze_task(task_id: int, payload: SnoozeRequest):
     await db.snooze_task(task_id, payload.minutes)
     return {
         "message": f"Task snoozed for {payload.minutes} minutes",
-        "snoozed_until": (datetime.now() + timedelta(minutes=payload.minutes)).isoformat()
+        "snoozed_until": (local_now() + timedelta(minutes=payload.minutes)).isoformat()
     }
 
 

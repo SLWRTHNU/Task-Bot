@@ -79,7 +79,7 @@ async def send_reminder(bot: Bot, task: dict):
         await db.log_reminder(task["id"], level, message)
 
         # Advance escalation level for next reminder
-        next_level = min(level + 1, len(ESCALATION_MESSAGES) - 1)
+        next_level = level + 1
         next_interval = intervals[min(next_level, len(intervals) - 1)]
         next_reminder = (local_now() + timedelta(minutes=next_interval)).isoformat()
 
