@@ -1,10 +1,13 @@
 """Telegram bot handlers and escalating reminder logic for ADHD Task Bot."""
 
 import os
+import json
 import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
+
+import anthropic
 
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -13,40 +16,13 @@ from telegram.ext import (
 )
 from telegram.error import TelegramError
 
-import anthropic
-
 import database as db
+from database import local_now
 
 logger = logging.getLogger(__name__)
 
-# Lazy-initialized Anthropic client
-_anthropic_client: Optional[anthropic.Anthropic] = None
-
-def get_anthropic_client() -> anthropic.Anthropic:
-    global _anthropic_client
-    if _anthropic_client is None:
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
-        _anthropic_client = anthropic.Anthropic(api_key=api_key)
-    return _anthropic_client
-
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = int(os.getenv("TELEGRAM_CHAT_ID", "0"))
-
-# Escalation messages — progressively more urgent for ADHD brains
-ESCALATION_TEMPLATES = [
-    # Level 0 — gentle nudge
-    ("🌱", "Hey! Just a nudge:", "You've got something to do."),
-    # Level 1 — friendly reminder
-    ("⏰", "Reminder:", "Don't forget about this one!"),
-    # Level 2 — more direct
-    ("🔔", "Still waiting:", "This task is still pending. You got this!"),
-    # Level 3 — urgent
-    ("🚨", "URGENT:", "This needs your attention NOW. You can do it!"),
-    # Level 4 — critical
-    ("🔴", "CRITICAL:", "DROP EVERYTHING — this task is overdue! Complete it NOW."),
-]
 
 PRIORITY_EMOJI = {
     "low": "🟢",
@@ -58,54 +34,22 @@ PRIORITY_EMOJI = {
 
 def build_task_message(task: dict, escalation_level: int) -> str:
     """Build a formatted Telegram message for a task reminder."""
-    level = min(escalation_level, len(ESCALATION_TEMPLATES) - 1)
-    emoji, header, footer = ESCALATION_TEMPLATES[level]
-    priority = task.get("priority", "medium")
-    p_emoji = PRIORITY_EMOJI.get(priority, "🟡")
-
-    due = task.get("due_date", "")
-    due_str = ""
-    if due:
-        try:
-            due_dt = datetime.fromisoformat(due)
-            due_str = f"\n📅 Due: {due_dt.strftime('%b %d, %Y %H:%M')}"
-        except ValueError:
-            due_str = f"\n📅 Due: {due}"
-
-    recurrence = task.get("recurrence", "none")
-    rec_str = f"\n🔁 Recurring: {recurrence}" if recurrence != "none" else ""
-
-    tags = task.get("tags", "")
-    tag_str = f"\n🏷️ {tags}" if tags else ""
-
-    msg = (
-        f"{emoji} <b>{header}</b>\n\n"
-        f"{p_emoji} <b>{task['title']}</b>"
-        f"{due_str}{rec_str}{tag_str}\n"
-    )
-    if task.get("description"):
-        msg += f"\n📝 {task['description']}\n"
-    msg += f"\n<i>{footer}</i>"
-    return msg
+    return f"<b>{task['title']}</b>"
 
 
 def build_task_keyboard(task_id: int, escalation_level: int) -> InlineKeyboardMarkup:
     """Build inline keyboard for a task reminder."""
     buttons = [
         [
-            InlineKeyboardButton("✅ Done!", callback_data=f"done:{task_id}"),
-            InlineKeyboardButton("😴 Snooze 15m", callback_data=f"snooze15:{task_id}"),
-        ],
-        [
-            InlineKeyboardButton("⏳ Snooze 1h", callback_data=f"snooze60:{task_id}"),
-            InlineKeyboardButton("📋 All Tasks", callback_data="list"),
+            InlineKeyboardButton("✅ Done", callback_data=f"done:{task_id}"),
+            InlineKeyboardButton("📅 Push to Tomorrow", callback_data=f"tomorrow:{task_id}"),
         ],
     ]
     return InlineKeyboardMarkup(buttons)
 
 
 async def send_reminder(bot: Bot, task: dict):
-    """Send an escalating reminder for a task."""
+    """Send an escalating reminder for a task, deleting the previous one first."""
     level = task.get("current_escalation_level", 0)
     escalation_minutes = task.get("reminder_escalation_minutes", "0,30,60,120,240")
 
@@ -117,8 +61,16 @@ async def send_reminder(bot: Bot, task: dict):
     message = build_task_message(task, level)
     keyboard = build_task_keyboard(task["id"], level)
 
+    # Delete the previous reminder message for this task (if any)
+    old_msg_id = task.get("last_message_id")
+    if old_msg_id:
+        try:
+            await bot.delete_message(chat_id=CHAT_ID, message_id=old_msg_id)
+        except TelegramError:
+            pass  # Already deleted or too old — ignore
+
     try:
-        await bot.send_message(
+        sent = await bot.send_message(
             chat_id=CHAT_ID,
             text=message,
             parse_mode="HTML",
@@ -127,15 +79,16 @@ async def send_reminder(bot: Bot, task: dict):
         await db.log_reminder(task["id"], level, message)
 
         # Advance escalation level for next reminder
-        next_level = min(level + 1, len(ESCALATION_TEMPLATES) - 1)
+        next_level = min(level + 1, len(ESCALATION_MESSAGES) - 1)
         next_interval = intervals[min(next_level, len(intervals) - 1)]
-        next_reminder = (datetime.now() + timedelta(minutes=next_interval)).isoformat()
+        next_reminder = (local_now() + timedelta(minutes=next_interval)).isoformat()
 
         await db.update_task(
             task["id"],
             current_escalation_level=next_level,
-            last_reminder_sent=datetime.now().isoformat(),
+            last_reminder_sent=local_now().isoformat(),
             reminder_start=next_reminder,
+            last_message_id=sent.message_id,
         )
         logger.info(f"Sent level-{level} reminder for task {task['id']}: {task['title']}")
     except TelegramError as e:
@@ -162,10 +115,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Commands:</b>\n"
         "/tasks — View all pending tasks\n"
         "/add — Add a new task\n"
+        "/ask — Add a task using natural language (AI-powered)\n"
         "/done &lt;id&gt; — Complete a task\n"
         "/snooze &lt;id&gt; [minutes] — Snooze a task\n"
         "/delete &lt;id&gt; — Delete a task\n"
-        "/ask &lt;question&gt; — Ask Claude anything\n"
         "/help — Show this message\n\n"
         "You can also manage tasks via the web dashboard! 🌐"
     )
@@ -241,18 +194,23 @@ async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     title = " ".join(args)
     # Default: remind in 5 minutes
-    reminder_start = (datetime.now() + timedelta(minutes=5)).isoformat()
+    reminder_start = (local_now() + timedelta(minutes=5)).isoformat()
     task_id = await db.create_task(
         title=title,
         reminder_start=reminder_start,
         due_date=reminder_start,
     )
-    await update.message.reply_text(
+    confirm_msg = await update.message.reply_text(
         f"✅ Task <b>#{task_id}</b> created: {title}\n"
         f"First reminder in 5 minutes!\n\n"
         f"Use the web dashboard to set recurrence and priority.",
         parse_mode="HTML"
     )
+    await asyncio.sleep(5)
+    try:
+        await confirm_msg.delete()
+    except TelegramError:
+        pass
 
 
 async def cmd_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -294,7 +252,7 @@ async def cmd_snooze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await db.snooze_task(task_id, minutes)
     await update.message.reply_text(
         f"😴 Task <b>#{task_id}</b> snoozed for {minutes} minutes.\n"
-        f"I'll remind you again at {(datetime.now() + timedelta(minutes=minutes)).strftime('%H:%M')}.",
+        f"I'll remind you again at {(local_now() + timedelta(minutes=minutes)).strftime('%H:%M')}.",
         parse_mode="HTML"
     )
 
@@ -316,47 +274,117 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🗑️ Task <b>#{task_id}</b> deleted: {task['title']}", parse_mode="HTML")
 
 
+_ASK_SYSTEM_PROMPT = """\
+You are a task parser. The user will describe a task in natural language.
+Extract the following fields and return ONLY a valid JSON object with these keys:
+- "title": short task title (string, required)
+- "due_date": ISO 8601 datetime string (e.g. "2024-06-15T10:00:00") or null if not specified
+- "recurrence": one of "none", "hourly", "daily", "weekly", "monthly" (default "none")
+- "recurrence_interval": integer >= 1, how many units between recurrences (default 1)
+- "priority": one of "low", "medium", "high", "urgent" (default "medium")
+- "tags": comma-separated tag string or empty string
+
+Today's date and time is {now}. Use it to resolve relative dates like "tomorrow", "next Sunday", etc.
+Return ONLY the JSON object, no explanation, no markdown fences."""
+
+
 async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ask Claude a question: /ask <question>"""
+    """Create a task from natural language: /ask <description>"""
     args = context.args
     if not args:
         await update.message.reply_text(
-            "Usage: /ask <question>\nExample: /ask How should I prioritize my tasks today?"
+            "Usage: /ask <natural language task description>\n"
+            "Example: /ask clean the bathrooms every Sunday at 10am high priority"
         )
         return
 
-    question = " ".join(args)
-    logger.debug(f"cmd_ask called with question: {question!r}")
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        await update.message.reply_text(
+            "⚠️ ANTHROPIC_API_KEY is not set. Please add it to your environment."
+        )
+        return
+
+    user_text = " ".join(args)
+    tz = db.LOCAL_TZ
+    now_str = datetime.now(tz).strftime("%Y-%m-%dT%H:%M:%S %Z")
+    system_prompt = _ASK_SYSTEM_PROMPT.format(now=now_str)
+
+    parsing_msg = await update.message.reply_text("🤔 Parsing your task...")
 
     try:
-        client = get_anthropic_client()
-        logger.debug("Anthropic client initialized, sending request with model=claude-sonnet-4-5")
-
-        response = client.messages.create(
-            model="claude-sonnet-4-5",
-            max_tokens=1024,
-            messages=[{"role": "user", "content": question}],
+        client = anthropic.AsyncAnthropic(api_key=api_key)
+        response = await client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=512,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_text}],
         )
-
-        answer = response.content[0].text
-        logger.debug(f"Received response: stop_reason={response.stop_reason}, tokens={response.usage}")
-        await update.message.reply_text(answer)
-
-    except ValueError as e:
-        logger.error(f"Configuration error in cmd_ask: {e}")
-        await update.message.reply_text(f"Configuration error: {e}")
+        raw = response.content[0].text.strip()
+        parsed = json.loads(raw)
+    except anthropic.AuthenticationError:
+        await parsing_msg.edit_text("⚠️ Invalid ANTHROPIC_API_KEY. Please check your key.")
+        return
     except anthropic.APIStatusError as e:
-        logger.error(
-            f"Anthropic API error in cmd_ask: status={e.status_code} "
-            f"response={e.response.text if e.response else 'N/A'} message={e.message}"
-        )
-        await update.message.reply_text(f"API error ({e.status_code}): {e.message}")
-    except anthropic.APIConnectionError as e:
-        logger.error(f"Anthropic connection error in cmd_ask: {e}")
-        await update.message.reply_text("Could not connect to Claude API. Check your network.")
-    except Exception as e:
-        logger.error(f"Unexpected error in cmd_ask: {type(e).__name__}: {e}", exc_info=True)
-        await update.message.reply_text("Something went wrong. Check logs for details.")
+        logger.error(f"/ask API error: {e}")
+        await parsing_msg.edit_text(f"⚠️ Claude API error ({e.status_code}). Please try again.")
+        return
+    except anthropic.APIConnectionError:
+        logger.error("/ask connection error")
+        await parsing_msg.edit_text("⚠️ Could not reach the Claude API. Check your network.")
+        return
+    except (json.JSONDecodeError, KeyError, IndexError) as e:
+        logger.error(f"/ask JSON parse error: {e}")
+        await parsing_msg.edit_text("⚠️ Couldn't parse Claude's response. Please rephrase and try again.")
+        return
+
+    # Parsing succeeded — remove the interim message
+    try:
+        await parsing_msg.delete()
+    except TelegramError:
+        pass
+
+    title = parsed.get("title", user_text)
+    due_date = parsed.get("due_date") or None
+    recurrence = parsed.get("recurrence", "none")
+    recurrence_interval = int(parsed.get("recurrence_interval") or 1)
+    priority = parsed.get("priority", "medium")
+    tags = parsed.get("tags", "") or ""
+
+    # Set reminder_start to due_date if given, else 5 minutes from now
+    if due_date:
+        reminder_start = due_date
+    else:
+        reminder_start = (local_now() + timedelta(minutes=5)).isoformat()
+
+    task_id = await db.create_task(
+        title=title,
+        recurrence=recurrence,
+        recurrence_interval=recurrence_interval,
+        due_date=due_date,
+        reminder_start=reminder_start,
+        priority=priority,
+        tags=tags,
+    )
+
+    # Build a plain-English confirmation, show briefly, then delete
+    parts = [f"✅ <b>{title}</b>"]
+    if due_date:
+        try:
+            due_dt = datetime.fromisoformat(due_date)
+            parts.append(f"📅 {due_dt.strftime('%A, %b %d at %I:%M %p')}")
+        except ValueError:
+            parts.append(f"📅 {due_date}")
+    if recurrence != "none":
+        interval_str = f"every {recurrence_interval} " if recurrence_interval > 1 else "every "
+        parts.append(f"🔁 {interval_str}{recurrence}")
+
+    confirm_msg = await update.message.reply_text("\n".join(parts), parse_mode="HTML")
+    await asyncio.sleep(5)
+    try:
+        await confirm_msg.delete()
+    except TelegramError:
+        pass
 
 
 # ── Callback query handlers ───────────────────────────────────────────────────
@@ -379,32 +407,28 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg += f"\n\n🔁 Recurring task regenerated as <b>#{new_id}</b>."
         await query.edit_message_text(msg, parse_mode="HTML")
 
-    elif data.startswith("snooze"):
-        parts = data.split(":")
-        minutes = int(parts[0].replace("snooze", ""))
-        task_id = int(parts[1])
+    elif data.startswith("tomorrow:"):
+        task_id = int(data.split(":")[1])
         task = await db.get_task(task_id)
         if not task:
             await query.edit_message_text("Task not found.")
             return
-        await db.snooze_task(task_id, minutes)
-        wake_time = (datetime.now() + timedelta(minutes=minutes)).strftime("%H:%M")
+        # Shift due_date and reminder_start forward by one day
+        now = local_now()
+        if task.get("due_date"):
+            try:
+                due = datetime.fromisoformat(task["due_date"])
+                new_due = due + timedelta(days=1)
+            except (ValueError, TypeError):
+                new_due = now.replace(hour=9, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        else:
+            new_due = now.replace(hour=9, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        new_due_str = new_due.strftime("%Y-%m-%dT%H:%M:%S")
+        await db.update_task(task_id, due_date=new_due_str, reminder_start=new_due_str, snoozed_until=None)
         await query.edit_message_text(
-            f"😴 Snoozed <b>{task['title']}</b> for {minutes} min.\n"
-            f"I'll nudge you again at {wake_time}.",
+            f"📅 Moved <b>{task['title']}</b> to tomorrow ({new_due.strftime('%b %d at %I:%M %p')}).",
             parse_mode="HTML"
         )
-
-    elif data == "list":
-        tasks = await db.get_all_tasks(status="pending")
-        if not tasks:
-            await query.edit_message_text("🎉 No pending tasks! You're all caught up.")
-            return
-        lines = ["📋 <b>Pending Tasks:</b>\n"]
-        for task in tasks:
-            p_emoji = PRIORITY_EMOJI.get(task.get("priority", "medium"), "🟡")
-            lines.append(f"{p_emoji} <b>#{task['id']}</b> {task['title']}")
-        await query.edit_message_text("\n".join(lines), parse_mode="HTML")
 
 
 def create_bot_app() -> Application:
@@ -416,10 +440,10 @@ def create_bot_app() -> Application:
     app.add_handler(CommandHandler("tasks", cmd_tasks))
     app.add_handler(CommandHandler("all", cmd_all))
     app.add_handler(CommandHandler("add", cmd_add))
+    app.add_handler(CommandHandler("ask", cmd_ask))
     app.add_handler(CommandHandler("done", cmd_done))
     app.add_handler(CommandHandler("snooze", cmd_snooze))
     app.add_handler(CommandHandler("delete", cmd_delete))
-    app.add_handler(CommandHandler("ask", cmd_ask))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
     return app
