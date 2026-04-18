@@ -207,7 +207,7 @@ async def get_due_tasks():
 
 def calculate_next_due(task: dict) -> str:
     """Calculate the next due date based on recurrence settings."""
-    base = task.get("due_date") or datetime.now().isoformat()
+    base = task.get("due_date") or local_now().isoformat()
     try:
         base_dt = datetime.fromisoformat(base)
     except (ValueError, TypeError):
