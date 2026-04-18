@@ -1,4 +1,4 @@
-"""FastAPI REST endpoints for the ADHD Task Bot web dashboard."""
+"""FastAPI REST endpoints for the Task Bot web dashboard."""
 
 import os
 import logging
@@ -16,7 +16,7 @@ from database import local_now
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="ADHD Task Bot", version="1.0.0")
+app = FastAPI(title="Task Bot", version="1.0.0")
 
 # Mount static files and templates
 templates = Jinja2Templates(directory="templates")

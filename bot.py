@@ -1,4 +1,4 @@
-"""Telegram bot handlers and escalating reminder logic for ADHD Task Bot."""
+"""Telegram bot handlers and escalating reminder logic for Task Bot."""
 
 import os
 import json
@@ -110,7 +110,7 @@ async def check_and_send_reminders(bot: Bot):
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
     text = (
-        "🧠 <b>ADHD Task Bot</b> is ready!\n\n"
+        "🧠 <b>Task Bot</b> is ready!\n\n"
         "I'll send you escalating reminders so nothing slips through the cracks.\n\n"
         "<b>Commands:</b>\n"
         "/tasks — View all pending tasks\n"

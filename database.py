@@ -1,4 +1,4 @@
-"""Database setup and operations for ADHD Task Bot."""
+"""Database setup and operations for Task Bot."""
 
 import aiosqlite
 import asyncio
