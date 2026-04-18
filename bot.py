@@ -6,7 +6,6 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
-from zoneinfo import ZoneInfo
 
 import anthropic
 
@@ -25,21 +24,6 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = int(os.getenv("TELEGRAM_CHAT_ID", "0"))
 
-# Escalation messages — progressively harsher to cut through ADHD avoidance
-# Schedule: 0h (due), +30min, +1h, +2h, +3h, +4h, ...
-ESCALATION_MESSAGES = [
-    # Level 0 — gentle nudge (sent at due time)
-    "Hey. This is your reminder. Take a moment right now and get it done — you've totally got this. 💪",
-    # Level 1 — firmer (+30 min)
-    "Still waiting on this one. 30 minutes have gone by. The longer it sits, the heavier it gets. Just start — even badly — right now.",
-    # Level 2 — direct, no sugarcoating (+1 hour)
-    "An hour. This has been sitting for an hour. This is exactly how things pile up and you end up overwhelmed. Stop. Do it now.",
-    # Level 3 — blunt and confrontational (+2 hours)
-    "Two hours. You've had two full hours to handle this and you haven't. That's a choice you keep making. Make a different one. Right now. No more waiting.",
-    # Level 4 — no mercy, repeated every hour after (+3h, +4h, ...)
-    "You are STILL ignoring this. Every hour you don't do it, you feel worse — more guilty, more behind, more stuck. That feeling doesn't go away on its own. Only you can end it. DO IT NOW.",
-]
-
 PRIORITY_EMOJI = {
     "low": "🟢",
     "medium": "🟡",
@@ -50,34 +34,7 @@ PRIORITY_EMOJI = {
 
 def build_task_message(task: dict, escalation_level: int) -> str:
     """Build a formatted Telegram message for a task reminder."""
-    level = min(escalation_level, len(ESCALATION_MESSAGES) - 1)
-    motivation = ESCALATION_MESSAGES[level]
-    priority = task.get("priority", "medium")
-    p_emoji = PRIORITY_EMOJI.get(priority, "🟡")
-
-    due = task.get("due_date", "")
-    due_str = ""
-    if due:
-        try:
-            due_dt = datetime.fromisoformat(due)
-            due_str = f"\n📅 Due: {due_dt.strftime('%b %d, %Y %H:%M')}"
-        except ValueError:
-            due_str = f"\n📅 Due: {due}"
-
-    recurrence = task.get("recurrence", "none")
-    rec_str = f"\n🔁 Recurring: {recurrence}" if recurrence != "none" else ""
-
-    tags = task.get("tags", "")
-    tag_str = f"\n🏷️ {tags}" if tags else ""
-
-    msg = (
-        f"{p_emoji} <b>Task:</b> {task['title']}"
-        f"{due_str}{rec_str}{tag_str}\n"
-    )
-    if task.get("description"):
-        msg += f"\n📝 {task['description']}\n"
-    msg += f"\n<i>{motivation}</i>"
-    return msg
+    return f"<b>{task['title']}</b>"
 
 
 def build_task_keyboard(task_id: int, escalation_level: int) -> InlineKeyboardMarkup:
@@ -85,7 +42,7 @@ def build_task_keyboard(task_id: int, escalation_level: int) -> InlineKeyboardMa
     buttons = [
         [
             InlineKeyboardButton("✅ Done", callback_data=f"done:{task_id}"),
-            InlineKeyboardButton("⏳ Push 24h", callback_data=f"tomorrow:{task_id}"),
+            InlineKeyboardButton("📅 Push to Tomorrow", callback_data=f"tomorrow:{task_id}"),
         ],
     ]
     return InlineKeyboardMarkup(buttons)
@@ -349,7 +306,7 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user_text = " ".join(args)
-    tz = ZoneInfo(os.getenv("TIMEZONE", "UTC"))
+    tz = db.LOCAL_TZ
     now_str = datetime.now(tz).strftime("%Y-%m-%dT%H:%M:%S %Z")
     system_prompt = _ASK_SYSTEM_PROMPT.format(now=now_str)
 
@@ -411,20 +368,16 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     # Build a plain-English confirmation, show briefly, then delete
-    p_emoji = PRIORITY_EMOJI.get(priority, "🟡")
-    parts = [f"✅ Task <b>#{task_id}</b> created: <b>{title}</b>"]
+    parts = [f"✅ <b>{title}</b>"]
     if due_date:
         try:
             due_dt = datetime.fromisoformat(due_date)
-            parts.append(f"📅 Due: {due_dt.strftime('%A, %b %d at %I:%M %p')}")
+            parts.append(f"📅 {due_dt.strftime('%A, %b %d at %I:%M %p')}")
         except ValueError:
-            parts.append(f"📅 Due: {due_date}")
+            parts.append(f"📅 {due_date}")
     if recurrence != "none":
         interval_str = f"every {recurrence_interval} " if recurrence_interval > 1 else "every "
-        parts.append(f"🔁 Repeats: {interval_str}{recurrence}")
-    parts.append(f"{p_emoji} Priority: {priority}")
-    if tags:
-        parts.append(f"🏷️ Tags: {tags}")
+        parts.append(f"🔁 {interval_str}{recurrence}")
 
     confirm_msg = await update.message.reply_text("\n".join(parts), parse_mode="HTML")
     await asyncio.sleep(5)
