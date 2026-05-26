@@ -32,6 +32,23 @@ PRIORITY_EMOJI = {
 }
 
 
+async def _delete_after(message, delay: int):
+    await asyncio.sleep(delay)
+    try:
+        await message.delete()
+    except TelegramError:
+        pass
+
+
+async def send_and_delete(update: Update, text: str, delay: int = 5, **kwargs):
+    """Send (or edit-inline for callbacks) then silently delete after delay seconds."""
+    if update.callback_query:
+        msg = await update.callback_query.edit_message_text(text, **kwargs)
+    else:
+        msg = await update.message.reply_text(text, **kwargs)
+    asyncio.create_task(_delete_after(msg, delay))
+
+
 def build_task_message(task: dict, escalation_level: int) -> str:
     """Build a formatted Telegram message for a task reminder."""
     return f"<b>{task['title']}</b>"
@@ -115,14 +132,14 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Commands:</b>\n"
         "/tasks — View all pending tasks\n"
         "/add — Add a new task\n"
-        "/ask — Add a task using natural language (AI-powered)\n"
+        "/task — Add a task using natural language (AI-powered)\n"
         "/done &lt;id&gt; — Complete a task\n"
         "/snooze &lt;id&gt; [minutes] — Snooze a task\n"
         "/delete &lt;id&gt; — Delete a task\n"
         "/help — Show this message\n\n"
         "You can also manage tasks via the web dashboard! 🌐"
     )
-    await update.message.reply_text(text, parse_mode="HTML")
+    await send_and_delete(update, text, parse_mode="HTML")
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -134,10 +151,7 @@ async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all pending tasks."""
     tasks = await db.get_all_tasks(status="pending")
     if not tasks:
-        await update.message.reply_text(
-            "🎉 No pending tasks! You're all caught up.\n\n"
-            "Use /add to create a new task."
-        )
+        await send_and_delete(update, "🎉 No pending tasks! You're all caught up.\n\nUse /add to create a new task.")
         return
 
     lines = ["📋 <b>Pending Tasks:</b>\n"]
@@ -154,14 +168,14 @@ async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(f"{p_emoji} <b>#{task['id']}</b> {task['title']}{rec}{due}")
 
     lines.append("\n<i>Tap a task ID with /done &lt;id&gt; to complete it.</i>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await send_and_delete(update, "\n".join(lines), parse_mode="HTML")
 
 
 async def cmd_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List ALL tasks including completed."""
     tasks = await db.get_all_tasks()
     if not tasks:
-        await update.message.reply_text("No tasks found. Use /add to create one.")
+        await send_and_delete(update, "No tasks found. Use /add to create one.")
         return
 
     pending = [t for t in tasks if t["status"] == "pending"]
@@ -175,85 +189,76 @@ async def cmd_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines.append(f"  {p_emoji} #{t['id']} {t['title']}")
     if completed:
         lines.append("\n✅ <b>Completed:</b>")
-        for t in completed[-5:]:  # Show last 5 completed
+        for t in completed[-5:]:
             lines.append(f"  ✅ #{t['id']} {t['title']}")
 
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await send_and_delete(update, "\n".join(lines), parse_mode="HTML")
 
 
 async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Quick-add a task: /add [title]"""
     args = context.args
     if not args:
-        await update.message.reply_text(
-            "Usage: /add <title>\n"
-            "Example: /add Take medication\n\n"
-            "For full options (recurrence, priority, etc.) use the web dashboard."
+        await send_and_delete(
+            update,
+            "Usage: /add <title>\nExample: /add Take medication\n\nFor full options use the web dashboard.",
         )
         return
 
     title = " ".join(args)
-    # Default: remind in 5 minutes
     reminder_start = (local_now() + timedelta(minutes=5)).isoformat()
     task_id = await db.create_task(
         title=title,
         reminder_start=reminder_start,
         due_date=reminder_start,
     )
-    confirm_msg = await update.message.reply_text(
-        f"✅ Task <b>#{task_id}</b> created: {title}\n"
-        f"First reminder in 5 minutes!\n\n"
-        f"Use the web dashboard to set recurrence and priority.",
-        parse_mode="HTML"
+    await send_and_delete(
+        update,
+        f"✅ Task <b>#{task_id}</b> created: {title}\nFirst reminder in 5 minutes!",
+        parse_mode="HTML",
     )
-    await asyncio.sleep(5)
-    try:
-        await confirm_msg.delete()
-    except TelegramError:
-        pass
 
 
 async def cmd_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Mark a task as complete: /done <id>"""
     args = context.args
     if not args or not args[0].isdigit():
-        await update.message.reply_text("Usage: /done <task_id>\nExample: /done 3")
+        await send_and_delete(update, "Usage: /done <task_id>\nExample: /done 3")
         return
 
     task_id = int(args[0])
     task = await db.get_task(task_id)
     if not task:
-        await update.message.reply_text(f"Task #{task_id} not found.")
+        await send_and_delete(update, f"Task #{task_id} not found.")
         return
 
     new_id = await db.complete_task(task_id)
-    msg = f"🎉 Task <b>#{task_id}</b> complete: {task['title']}\n\nGreat job!"
+    msg = f"🎉 Task <b>#{task_id}</b> complete: {task['title']}"
     if new_id:
         msg += f"\n\n🔁 Recurring task regenerated as <b>#{new_id}</b>."
-    await update.message.reply_text(msg, parse_mode="HTML")
+    await send_and_delete(update, msg, parse_mode="HTML")
 
 
 async def cmd_snooze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Snooze a task: /snooze <id> [minutes]"""
     args = context.args
     if not args or not args[0].isdigit():
-        await update.message.reply_text(
-            "Usage: /snooze <task_id> [minutes]\nExample: /snooze 3 30"
-        )
+        await send_and_delete(update, "Usage: /snooze <task_id> [minutes]\nExample: /snooze 3 30")
         return
 
     task_id = int(args[0])
     minutes = int(args[1]) if len(args) > 1 and args[1].isdigit() else 30
     task = await db.get_task(task_id)
     if not task:
-        await update.message.reply_text(f"Task #{task_id} not found.")
+        await send_and_delete(update, f"Task #{task_id} not found.")
         return
 
     await db.snooze_task(task_id, minutes)
-    await update.message.reply_text(
+    await send_and_delete(
+        update,
         f"😴 Task <b>#{task_id}</b> snoozed for {minutes} minutes.\n"
         f"I'll remind you again at {(local_now() + timedelta(minutes=minutes)).strftime('%H:%M')}.",
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
 
 
@@ -261,17 +266,17 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Delete a task: /delete <id>"""
     args = context.args
     if not args or not args[0].isdigit():
-        await update.message.reply_text("Usage: /delete <task_id>\nExample: /delete 3")
+        await send_and_delete(update, "Usage: /delete <task_id>\nExample: /delete 3")
         return
 
     task_id = int(args[0])
     task = await db.get_task(task_id)
     if not task:
-        await update.message.reply_text(f"Task #{task_id} not found.")
+        await send_and_delete(update, f"Task #{task_id} not found.")
         return
 
     await db.delete_task(task_id)
-    await update.message.reply_text(f"🗑️ Task <b>#{task_id}</b> deleted: {task['title']}", parse_mode="HTML")
+    await send_and_delete(update, f"🗑️ Task <b>#{task_id}</b> deleted: {task['title']}", parse_mode="HTML")
 
 
 _ASK_SYSTEM_PROMPT = """\
@@ -292,17 +297,16 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Create a task from natural language: /ask <description>"""
     args = context.args
     if not args:
-        await update.message.reply_text(
-            "Usage: /ask <natural language task description>\n"
-            "Example: /ask clean the bathrooms every Sunday at 10am high priority"
+        await send_and_delete(
+            update,
+            "Usage: /task <natural language description>\n"
+            "Example: /task clean the bathrooms every Sunday at 10am high priority",
         )
         return
 
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if not api_key:
-        await update.message.reply_text(
-            "⚠️ ANTHROPIC_API_KEY is not set. Please add it to your environment."
-        )
+        await send_and_delete(update, "⚠️ ANTHROPIC_API_KEY is not set. Please add it to your environment.")
         return
 
     user_text = " ".join(args)
@@ -323,19 +327,23 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         raw = response.content[0].text.strip()
         parsed = json.loads(raw)
     except anthropic.AuthenticationError:
-        await parsing_msg.edit_text("⚠️ Invalid ANTHROPIC_API_KEY. Please check your key.")
+        await parsing_msg.delete()
+        await send_and_delete(update, "⚠️ Invalid ANTHROPIC_API_KEY. Please check your key.")
         return
     except anthropic.APIStatusError as e:
         logger.error(f"/ask API error: {e}")
-        await parsing_msg.edit_text(f"⚠️ Claude API error ({e.status_code}). Please try again.")
+        await parsing_msg.delete()
+        await send_and_delete(update, f"⚠️ Claude API error ({e.status_code}). Please try again.")
         return
     except anthropic.APIConnectionError:
         logger.error("/ask connection error")
-        await parsing_msg.edit_text("⚠️ Could not reach the Claude API. Check your network.")
+        await parsing_msg.delete()
+        await send_and_delete(update, "⚠️ Could not reach the Claude API. Check your network.")
         return
     except (json.JSONDecodeError, KeyError, IndexError) as e:
         logger.error(f"/ask JSON parse error: {e}")
-        await parsing_msg.edit_text("⚠️ Couldn't parse Claude's response. Please rephrase and try again.")
+        await parsing_msg.delete()
+        await send_and_delete(update, "⚠️ Couldn't parse Claude's response. Please rephrase and try again.")
         return
 
     # Parsing succeeded — remove the interim message
@@ -379,12 +387,7 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         interval_str = f"every {recurrence_interval} " if recurrence_interval > 1 else "every "
         parts.append(f"🔁 {interval_str}{recurrence}")
 
-    confirm_msg = await update.message.reply_text("\n".join(parts), parse_mode="HTML")
-    await asyncio.sleep(5)
-    try:
-        await confirm_msg.delete()
-    except TelegramError:
-        pass
+    await send_and_delete(update, "\n".join(parts), parse_mode="HTML")
 
 
 # ── Callback query handlers ───────────────────────────────────────────────────
@@ -411,9 +414,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         task_id = int(data.split(":")[1])
         task = await db.get_task(task_id)
         if not task:
-            await query.edit_message_text("Task not found.")
+            await send_and_delete(update, "Task not found.")
             return
-        # Shift due_date and reminder_start forward by one day
         now = local_now()
         if task.get("due_date"):
             try:
@@ -425,9 +427,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             new_due = now.replace(hour=9, minute=0, second=0, microsecond=0) + timedelta(days=1)
         new_due_str = new_due.strftime("%Y-%m-%dT%H:%M:%S")
         await db.update_task(task_id, due_date=new_due_str, reminder_start=new_due_str, snoozed_until=None)
-        await query.edit_message_text(
+        await send_and_delete(
+            update,
             f"📅 Moved <b>{task['title']}</b> to tomorrow ({new_due.strftime('%b %d at %I:%M %p')}).",
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
 
 
@@ -441,6 +444,7 @@ def create_bot_app() -> Application:
     app.add_handler(CommandHandler("all", cmd_all))
     app.add_handler(CommandHandler("add", cmd_add))
     app.add_handler(CommandHandler("ask", cmd_ask))
+    app.add_handler(CommandHandler("task", cmd_ask))
     app.add_handler(CommandHandler("done", cmd_done))
     app.add_handler(CommandHandler("snooze", cmd_snooze))
     app.add_handler(CommandHandler("delete", cmd_delete))
