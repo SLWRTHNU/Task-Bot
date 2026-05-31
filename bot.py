@@ -31,6 +31,8 @@ PRIORITY_EMOJI = {
     "urgent": "💥",
 }
 
+SNOOZE_MINUTES = [0, 15, 30, 45]
+
 
 async def _delete_after(message, delay: int):
     await asyncio.sleep(delay)
@@ -56,10 +58,34 @@ def build_task_message(task: dict, escalation_level: int) -> str:
 
 def build_task_keyboard(task_id: int, escalation_level: int) -> InlineKeyboardMarkup:
     """Build inline keyboard for a task reminder."""
+    buttons = [[
+        InlineKeyboardButton("✅ Done", callback_data=f"done:{task_id}"),
+        InlineKeyboardButton("⏰ Snooze", callback_data=f"snooze:{task_id}"),
+        InlineKeyboardButton("📅 Tomorrow", callback_data=f"tomorrow:{task_id}"),
+    ]]
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_snooze_picker_keyboard(task_id: int, hours: int, minutes: int) -> InlineKeyboardMarkup:
+    """Build the hour/minute scroll-wheel picker keyboard."""
     buttons = [
         [
-            InlineKeyboardButton("✅ Done", callback_data=f"done:{task_id}"),
-            InlineKeyboardButton("📅 Push to Tomorrow", callback_data=f"tomorrow:{task_id}"),
+            InlineKeyboardButton("▲", callback_data=f"snz_hu:{task_id}:{hours}:{minutes}"),
+            InlineKeyboardButton("▲", callback_data=f"snz_mu:{task_id}:{hours}:{minutes}"),
+        ],
+        [
+            InlineKeyboardButton(f"{hours}h", callback_data="noop"),
+            InlineKeyboardButton(f"{minutes}m", callback_data="noop"),
+        ],
+        [
+            InlineKeyboardButton("▼", callback_data=f"snz_hd:{task_id}:{hours}:{minutes}"),
+            InlineKeyboardButton("▼", callback_data=f"snz_md:{task_id}:{hours}:{minutes}"),
+        ],
+        [
+            InlineKeyboardButton(
+                f"✅ Snooze {hours}h {minutes}m",
+                callback_data=f"snz_ok:{task_id}:{hours}:{minutes}",
+            ),
         ],
     ]
     return InlineKeyboardMarkup(buttons)
@@ -409,6 +435,49 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.delete()
         except TelegramError:
             pass
+
+    elif data.startswith("snooze:"):
+        task_id = int(data.split(":")[1])
+        task = await db.get_task(task_id)
+        if not task:
+            await send_and_delete(update, "Task not found.")
+            return
+        await query.edit_message_text(
+            f"<b>{task['title']}</b>\n⏰ Snooze for how long?",
+            parse_mode="HTML",
+            reply_markup=build_snooze_picker_keyboard(task_id, 0, 0),
+        )
+
+    elif data.startswith("snz_"):
+        parts = data.split(":")
+        action, task_id, hours, minutes = parts[0], int(parts[1]), int(parts[2]), int(parts[3])
+
+        if action == "snz_ok":
+            await db.snooze_task(task_id, hours * 60 + minutes)
+            try:
+                await query.message.delete()
+            except TelegramError:
+                pass
+            return
+
+        if action == "snz_hu":
+            hours = (hours + 1) % 25
+        elif action == "snz_hd":
+            hours = (hours - 1) % 25
+        else:
+            try:
+                m_idx = SNOOZE_MINUTES.index(minutes)
+            except ValueError:
+                m_idx = 0
+            m_idx = (m_idx + (1 if action == "snz_mu" else -1)) % len(SNOOZE_MINUTES)
+            minutes = SNOOZE_MINUTES[m_idx]
+
+        await query.edit_message_reply_markup(
+            reply_markup=build_snooze_picker_keyboard(task_id, hours, minutes)
+        )
+
+    elif data == "noop":
+        pass
 
     elif data.startswith("tomorrow:"):
         task_id = int(data.split(":")[1])
