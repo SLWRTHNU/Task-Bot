@@ -174,8 +174,13 @@ async def delete_task(task_id: int):
 
 async def snooze_task(task_id: int, minutes: int = 30):
     """Snooze a task's reminders for N minutes."""
-    snoozed_until = (local_now() + timedelta(minutes=minutes)).isoformat()
-    await update_task(task_id, snoozed_until=snoozed_until, current_escalation_level=0)
+    snooze_time = (local_now() + timedelta(minutes=minutes)).isoformat()
+    await update_task(
+        task_id,
+        snoozed_until=snooze_time,
+        reminder_start=snooze_time,
+        current_escalation_level=0,
+    )
 
 
 async def log_reminder(task_id: int, escalation_level: int, message: str):
@@ -190,16 +195,19 @@ async def log_reminder(task_id: int, escalation_level: int, message: str):
 
 async def get_due_tasks():
     """Get tasks that are pending and due for a reminder."""
-    now = local_now().isoformat()
+    now = local_now()
+    now_str = now.isoformat()
+    dedup_cutoff = (now - timedelta(minutes=2)).isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             """SELECT * FROM tasks
                WHERE status = 'pending'
-               AND (reminder_start IS NOT NULL AND reminder_start <= ?)
+               AND reminder_start IS NOT NULL AND reminder_start <= ?
                AND (snoozed_until IS NULL OR snoozed_until <= ?)
+               AND (last_reminder_sent IS NULL OR last_reminder_sent <= ?)
                ORDER BY priority DESC, due_date ASC""",
-            (now, now)
+            (now_str, now_str, dedup_cutoff)
         )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]

@@ -495,7 +495,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             new_due = now.replace(hour=9, minute=0, second=0, microsecond=0) + timedelta(days=1)
         new_due_str = new_due.strftime("%Y-%m-%dT%H:%M:%S")
-        await db.update_task(task_id, due_date=new_due_str, reminder_start=new_due_str, snoozed_until=None)
+        await db.update_task(
+            task_id,
+            reminder_start=new_due_str,
+            snoozed_until=None,
+            current_escalation_level=0,
+        )
         await send_and_delete(
             update,
             f"📅 Moved <b>{task['title']}</b> to tomorrow ({new_due.strftime('%b %d at %I:%M %p')}).",
