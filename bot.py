@@ -280,6 +280,12 @@ async def cmd_snooze(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await db.snooze_task(task_id, minutes)
+    updated = await db.get_task(task_id)
+    logger.info(
+        f"[/snooze] task {task_id}: reminder_start={updated['reminder_start']!r} "
+        f"snoozed_until={updated['snoozed_until']!r} "
+        f"current_escalation_level={updated['current_escalation_level']!r}"
+    )
     await send_and_delete(
         update,
         f"😴 Task <b>#{task_id}</b> snoozed for {minutes} minutes.\n"
@@ -453,7 +459,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         action, task_id, hours, minutes = parts[0], int(parts[1]), int(parts[2]), int(parts[3])
 
         if action == "snz_ok":
-            await db.snooze_task(task_id, hours * 60 + minutes)
+            total_minutes = hours * 60 + minutes
+            if total_minutes <= 0:
+                total_minutes = 1  # 0h0m default would otherwise re-fire instantly
+            await db.snooze_task(task_id, total_minutes)
+            updated = await db.get_task(task_id)
+            logger.info(
+                f"[snooze] task {task_id}: reminder_start={updated['reminder_start']!r} "
+                f"snoozed_until={updated['snoozed_until']!r} "
+                f"current_escalation_level={updated['current_escalation_level']!r}"
+            )
             try:
                 await query.message.delete()
             except TelegramError:
@@ -486,20 +501,34 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_and_delete(update, "Task not found.")
             return
         now = local_now()
-        if task.get("due_date"):
+        # Base the push on the currently scheduled reminder_start, not the
+        # original due_date — due_date is left untouched so recurrence still
+        # calculates from it, but it never changes, so basing the +1 day
+        # calc on it would recompute the same stale target every time this
+        # button is pressed instead of actually moving forward.
+        base_str = task.get("reminder_start") or task.get("due_date")
+        if base_str:
             try:
-                due = datetime.fromisoformat(task["due_date"])
-                new_due = due + timedelta(days=1)
+                base_dt = datetime.fromisoformat(base_str)
+                new_due = base_dt + timedelta(days=1)
             except (ValueError, TypeError):
                 new_due = now.replace(hour=9, minute=0, second=0, microsecond=0) + timedelta(days=1)
         else:
             new_due = now.replace(hour=9, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        if new_due <= now:
+            new_due = now + timedelta(days=1)
         new_due_str = new_due.strftime("%Y-%m-%dT%H:%M:%S")
         await db.update_task(
             task_id,
             reminder_start=new_due_str,
             snoozed_until=None,
             current_escalation_level=0,
+        )
+        updated = await db.get_task(task_id)
+        logger.info(
+            f"[tomorrow] task {task_id}: reminder_start={updated['reminder_start']!r} "
+            f"snoozed_until={updated['snoozed_until']!r} "
+            f"current_escalation_level={updated['current_escalation_level']!r}"
         )
         await send_and_delete(
             update,

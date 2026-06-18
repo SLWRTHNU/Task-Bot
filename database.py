@@ -2,10 +2,13 @@
 
 import aiosqlite
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 import os
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = os.getenv("DATABASE_PATH", "tasks.db")
 LOCAL_TZ = ZoneInfo(os.getenv("TIMEZONE", "America/Toronto"))
@@ -181,6 +184,12 @@ async def snooze_task(task_id: int, minutes: int = 30):
         reminder_start=snooze_time,
         current_escalation_level=0,
     )
+    updated = await get_task(task_id)
+    logger.info(
+        f"[snooze_task] task {task_id}: reminder_start={updated['reminder_start']!r} "
+        f"snoozed_until={updated['snoozed_until']!r} "
+        f"current_escalation_level={updated['current_escalation_level']!r}"
+    )
 
 
 async def log_reminder(task_id: int, escalation_level: int, message: str):
@@ -198,18 +207,19 @@ async def get_due_tasks():
     now = local_now()
     now_str = now.isoformat()
     dedup_cutoff = (now - timedelta(minutes=2)).isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            """SELECT * FROM tasks
+    query = """SELECT * FROM tasks
                WHERE status = 'pending'
                AND reminder_start IS NOT NULL AND reminder_start <= ?
                AND (snoozed_until IS NULL OR snoozed_until <= ?)
                AND (last_reminder_sent IS NULL OR last_reminder_sent <= ?)
-               ORDER BY priority DESC, due_date ASC""",
-            (now_str, now_str, dedup_cutoff)
-        )
+               ORDER BY priority DESC, due_date ASC"""
+    params = (now_str, now_str, dedup_cutoff)
+    logger.debug(f"get_due_tasks SQL: {query.strip()} | params={params}")
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(query, params)
         rows = await cursor.fetchall()
+        logger.debug(f"get_due_tasks matched {len(rows)} task(s): {[r['id'] for r in rows]}")
         return [dict(row) for row in rows]
 
 
